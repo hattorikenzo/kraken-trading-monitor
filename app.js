@@ -1,11 +1,13 @@
 'use strict';
-// Kraken Opportunity Bot v3.3: scanner spot multi-asset, sola lettura; NON invia ordini.
+// Kraken Opportunity Bot v3.4.2: scanner spot, esecuzione solo con conferma e blocco server.
 (()=>{
  const $=id=>document.getElementById(id);
  const fmt=(n,d=3)=>Number.isFinite(n)?n.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const API='https://api.kraken.com/0/public/', SCAN_MS=300000, MAX_OHLC=50, CONCURRENCY=3;
- const MAX_TRADE=10; // limite del monitor; la funzione di validazione ha limiti propri.
+ const MAX_TRADE=10;
+ const FIAT=new Set(['USD','USDC','USDT','EUR','GBP','ZGBP','CHF','CAD','ZCAD','AUD','ZAUD','JPY','ZJPY','ZUSD','ZEUR','ZCHF','ZGBP','ZCAD','ZAR','BRL','TRY','PLN']);
+ const isCrypto=s=>!FIAT.has(String(s).toUpperCase()); // limite del monitor; la funzione di validazione ha limiti propri.
  let balance=null,balanceAt=0,scanning=false,results=[],lastStats=''; let selectedLive=null;
  let settings={maxTrade:10,fee:0.8,slippage:0.15};
  try{const s=JSON.parse(localStorage.getItem('kraken_bot_v3_settings'));if(s)settings={...settings,...s}}catch{}
@@ -21,7 +23,7 @@
  async function api(path,params={}){const url=new URL(API+path);Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,String(v)));const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),18000);try{const r=await fetch(url,{cache:'no-store',signal:ctrl.signal});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error?.length)throw Error(j.error.join('; '));return j.result||{}}finally{clearTimeout(timer)}}
  const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
  function rsi(c){if(c.length<16)return 50;let up=0,down=0;for(let i=c.length-14;i<c.length;i++){const d=c[i]-c[i-1];up+=Math.max(d,0);down+=Math.max(-d,0)}return down===0?(up?100:50):100-100/(1+up/down)}
- function markets(raw){return Object.entries(raw).filter(([id,p])=>p&&p.status==='online'&&p.wsname?.includes('/')&&!p.wsname.includes('.d')&&p.base&&p.quote).map(([id,p])=>({id,name:p.wsname,base:p.base,quote:p.quote,ordermin:Number(p.ordermin)||0,costmin:Number(p.costmin)||0}));}
+ function markets(raw){return Object.entries(raw).filter(([id,p])=>p&&p.status==='online'&&p.wsname?.includes('/')&&!p.wsname.includes('.d')&&p.base&&p.quote&&isCrypto(p.base)).map(([id,p])=>({id,name:p.wsname,base:p.base,quote:p.quote,ordermin:Number(p.ordermin)||0,costmin:Number(p.costmin)||0}));}
  function tickerFor(tickers,p){return tickers[p.id]||tickers[p.name.replace('/','')]||null}
  function graphFrom(list,tickers){const graph=new Map(),market=[];const add=(a,e)=>{if(!graph.has(a))graph.set(a,[]);graph.get(a).push(e)};
   for(const p of list){const t=tickerFor(tickers,p);if(!t)continue;const bid=Number(t.b?.[0]),ask=Number(t.a?.[0]),last=Number(t.c?.[0]),volume=Number(t.v?.[1]);if(!(bid>0&&ask>=bid&&last>0&&volume>0))continue;const spread=100*(ask-bid)/((ask+bid)/2);if(spread>1.5)continue;const m={...p,bid,ask,last,volume,spread};market.push(m);
@@ -46,13 +48,13 @@
   const gain=metrics.back*(1+targetPct/100)-amount,loss=metrics.back*(1-stopPct/100)-amount,ratio=loss<0?gain/-loss:0;
   const spreadMax=Math.max(...route.map(e=>e.market.spread));
   const eligible=trend&&metrics.ok&&gain>0&&loss<0&&ratio>=1.3&&spreadMax<=0.6&&route.length===1&&last.side==='buy'&&amount>=5; // I percorsi a due gambe restano osservazioni: target su una sola coppia non basta.
-  return {name:route.at(-1).to,path:route.map(e=>e.market.name+' '+(e.side==='buy'?'acquista':'vendi')).join(' → '),route,direction,eligible,trend,amount,gain,loss,ratio,rv,atr,momentum,targetPct,stopPct,costPct:metrics.costPct,spreadMax,score:(trend?50:0)+Math.min(20,Math.max(0,momentum*4))+Math.max(0,20-metrics.costPct*5)+Math.min(10,ratio*3),why:route.length>1?'Rotazione multi-gamba: solo osservazione':!metrics.ok?'Minimi Kraken non verificati':!trend?'Trend non confermato':spreadMax>.6?'Spread elevato':!eligible?'Costi o rischio/rendimento sfavorevoli':'Da valutare'};
+  return {name:route.at(-1).to,path:route.map(e=>e.market.name+' '+(e.side==='buy'?'acquista':'vendi')).join(' → '),route,direction,eligible,trend,amount,gain,loss,ratio,rv,atr,momentum,targetPct,stopPct,costPct:metrics.costPct,spreadMax,score:(trend?50:0)+Math.min(20,Math.max(0,momentum*4))+Math.max(0,20-metrics.costPct*5)+Math.min(10,ratio*3),why:route.length>1?'Rotazione a più passaggi: non eseguibile':!metrics.ok?'Importo inferiore ai minimi Kraken':!trend?'Trend non confermato':spreadMax>.6?'Spread superiore allo 0,6%':gain<=0?'Target inferiore ai costi':loss>=0||ratio<1.3?'Rapporto rischio/rendimento insufficiente':!eligible?'Non idoneo':'Candidato idoneo'};
  }
- function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.score-a.score||b.gain-a.gain).slice(0,5);
-  $('opportunities').innerHTML=top.map(x=>`<tr><td>${esc(x.name)}<small style="display:block">${x.route.length} scambio/i</small></td><td>${x.direction}</td><td class="${x.eligible?'up':''}">${x.eligible?'DA VALUTARE':x.route.length>1?'OSSERVA':'ATTENDI'}</td><td class="${x.gain>=0?'up':'down'}">${x.route.length>1?'n.d.':fmt(x.gain,3)+' USDC'}</td><td>${fmt(x.costPct,2)}%</td></tr>`).join('')||'<tr><td colspan="5">Nessun percorso analizzato.</td></tr>';
-  const best=results.filter(x=>x.eligible && x.route.length===1 && x.route[0].side==='buy' && x.route[0].market.quote==='USDC').sort((a,b)=>b.score-a.score)[0]; selectedLive=best||null; window.krakenSelectedOrder=best?{pair:best.route[0].market.name.replace('/',''),side:'buy',budgetUSDC:String(Math.min(9.5,settings.maxTrade,balance||0))}:null; const orderBtn=$('prepareOrder');if(orderBtn)orderBtn.disabled=!best||!fresh;
+ function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.gain-a.gain||b.score-a.score).slice(0,5);
+  $('opportunities').innerHTML=top.map(x=>`<tr><td>${esc(x.name)}<small style="display:block">${x.route.length} scambio/i</small></td><td>${x.direction}</td><td class="${x.eligible?'up':''}">${esc(x.why)}</td><td class="${x.gain>=0?'up':'down'}">${x.route.length>1?'n.d.':fmt(x.gain,3)+' USDC'}</td><td>${fmt(x.costPct,2)}%</td></tr>`).join('')||'<tr><td colspan="5">Nessun percorso analizzato.</td></tr>';
+  const best=results.filter(x=>x.eligible && x.route.length===1 && x.route[0].side==='buy' && x.route[0].market.quote==='USDC').sort((a,b)=>b.gain-a.gain||b.score-a.score)[0]; selectedLive=best||null; window.krakenSelectedOrder=best?{pair:best.route[0].market.name.replace('/',''),side:'buy',budgetUSDC:String(Math.min(9.5,settings.maxTrade,balance||0))}:null; const orderBtn=$('prepareOrder');if(orderBtn)orderBtn.disabled=!best||!fresh;
   if(!fresh){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='SALDO DA VERIFICARE';$('decision').textContent='Accedi e aggiorna il saldo reale. Le analisi pubbliche sono disponibili, ma non formuliamo importi con saldo non recente.';return}
-  if(!best){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun percorso spot supera contemporaneamente trend, minimi di scambio, costi e rapporto rischio/rendimento. Conservare USDC è una scelta valida. Le rotazioni a due scambi restano scenari teorici, non ordini eseguibili dal bot.';return}
+  if(!best){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun acquisto diretto in USDC supera trend, minimi di scambio, costi e rapporto rischio/rendimento. Conservare USDC è una scelta valida. Le rotazioni a due scambi restano scenari teorici, non ordini eseguibili dal bot.';return}
   $('decisionStatus').textContent='DA VALUTARE';$('decision').textContent=`Destinazione: ${best.name}\nPercorso: USDC → ${best.route.map(e=>e.to).join(' → ')}\nGambe: ${best.path}\nImporto di riferimento: ${fmt(best.amount,2)} USDC (saldo totale; disponibilità effettiva da verificare)\nCosto stimato di andata e ritorno: ${fmt(best.costPct,2)}%\nTarget teorico sul mercato finale: +${fmt(best.targetPct,2)}% · Stop teorico: −${fmt(best.stopPct,2)}%\nRisultato teorico al target: ${fmt(best.gain,3)} USDC · allo stop: ${fmt(best.loss,3)} USDC\nRSI: ${fmt(best.rv,1)} · Momentum 24h: ${fmt(best.momentum,2)}%\nATTENZIONE: il target riguarda l'ultima coppia e NON garantisce il risultato in USDC di un percorso multi-gamba. Prezzi, liquidità e minimi devono essere ricontrollati prima di qualunque scambio. Nessun ordine viene inviato.`;
  }
  async function scan(){if(scanning)return;scanning=true;$('scanNow').disabled=true;setStatus('Analisi di tutte le coppie spot…');try{
@@ -62,6 +64,8 @@
   // Valutiamo TUTTI i percorsi a prezzi bid/ask, poi usiamo OHLC solo sui candidati più praticabili.
   const eligiblePaths=paths.map(path=>({path,metrics:routeMetrics(path,amount)})).filter(x=>x.metrics.ok&&x.metrics.costPct<5&&x.path.every(e=>e.market.spread<=1));
   eligiblePaths.sort((a,b)=>a.metrics.costPct-b.metrics.costPct||b.path.at(-1).market.volume*b.path.at(-1).market.last-a.path.at(-1).market.volume*a.path.at(-1).market.last);
+  // Prima le coppie acquistabili direttamente in USDC: sono le sole eseguibili dal backend.
+  eligiblePaths.sort((a,b)=>Number(b.path.length===1&&b.path[0].side==='buy'&&b.path[0].market.quote==='USDC')-Number(a.path.length===1&&a.path[0].side==='buy'&&a.path[0].market.quote==='USDC')||a.metrics.costPct-b.metrics.costPct);
   const selected=[],seen=new Set();for(const x of eligiblePaths){const id=x.path.at(-1).market.id;if(!seen.has(id)){seen.add(id);selected.push(x);if(selected.length===MAX_OHLC)break}}
   $('coverage').textContent=`${market.length} ticker validi · ${paths.length} percorsi ≤2 scambi · ${selected.length} OHLC`;
   const found=[];let ok=0,errors=0;for(let i=0;i<selected.length;i+=CONCURRENCY){await Promise.all(selected.slice(i,i+CONCURRENCY).map(async x=>{try{const raw=await api('OHLC',{pair:x.path.at(-1).market.id,interval:60});const item=analyze(raw,x.path,amount);if(item)found.push(item);ok++}catch(e){errors++;console.warn('OHLC',x.path.at(-1).market.name,e.message)}}));}
