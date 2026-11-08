@@ -1,5 +1,5 @@
 'use strict';
-// Kraken Opportunity Bot v3.4.2: scanner spot, esecuzione solo con conferma e blocco server.
+// Kraken Opportunity Bot v3.5.0: scanner spot, esecuzione solo con conferma e blocco server.
 (()=>{
  const $=id=>document.getElementById(id);
  const fmt=(n,d=3)=>Number.isFinite(n)?n.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
@@ -48,7 +48,7 @@
   const gain=metrics.back*(1+targetPct/100)-amount,loss=metrics.back*(1-stopPct/100)-amount,ratio=loss<0?gain/-loss:0;
   const spreadMax=Math.max(...route.map(e=>e.market.spread));
   const eligible=trend&&metrics.ok&&gain>0&&loss<0&&ratio>=1.3&&spreadMax<=0.6&&route.length===1&&last.side==='buy'&&amount>=5; // I percorsi a due gambe restano osservazioni: target su una sola coppia non basta.
-  return {name:route.at(-1).to,path:route.map(e=>e.market.name+' '+(e.side==='buy'?'acquista':'vendi')).join(' → '),route,direction,eligible,trend,amount,gain,loss,ratio,rv,atr,momentum,targetPct,stopPct,costPct:metrics.costPct,spreadMax,score:(trend?50:0)+Math.min(20,Math.max(0,momentum*4))+Math.max(0,20-metrics.costPct*5)+Math.min(10,ratio*3),why:route.length>1?'Rotazione a più passaggi: non eseguibile':!metrics.ok?'Importo inferiore ai minimi Kraken':!trend?'Trend non confermato':spreadMax>.6?'Spread superiore allo 0,6%':gain<=0?'Target inferiore ai costi':loss>=0||ratio<1.3?'Rapporto rischio/rendimento insufficiente':!eligible?'Non idoneo':'Candidato idoneo'};
+  return {name:route.at(-1).to,path:route.map(e=>e.market.name+' '+(e.side==='buy'?'acquista':'vendi')).join(' → '),route,direction,eligible,trend,amount,gain,loss,ratio,rv,atr,momentum,targetPct,stopPct,costPct:metrics.costPct,spreadMax,score:(trend?50:0)+Math.min(20,Math.max(0,momentum*4))+Math.max(0,20-metrics.costPct*5)+Math.min(10,ratio*3),why:route.length>1?'Rotazione: eseguire separatamente dopo verifica':!metrics.ok?'Importo inferiore ai minimi Kraken':!trend?'Trend non confermato':spreadMax>.6?'Spread superiore allo 0,6%':gain<=0?'Target inferiore ai costi':loss>=0||ratio<1.3?'Rapporto rischio/rendimento insufficiente':!eligible?'Non idoneo':'Candidato idoneo'};
  }
  function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.gain-a.gain||b.score-a.score).slice(0,5);
   $('opportunities').innerHTML=top.map(x=>`<tr><td>${esc(x.name)}<small style="display:block">${x.route.length} scambio/i</small></td><td>${x.direction}</td><td class="${x.eligible?'up':''}">${esc(x.why)}</td><td class="${x.gain>=0?'up':'down'}">${x.route.length>1?'n.d.':fmt(x.gain,3)+' USDC'}</td><td>${fmt(x.costPct,2)}%</td></tr>`).join('')||'<tr><td colspan="5">Nessun percorso analizzato.</td></tr>';
