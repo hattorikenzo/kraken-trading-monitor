@@ -171,3 +171,99 @@ function diagnosticsV13(){const result=[],details=[];for(const p of PAIRS){const
 }
 $('runDiagnostics').onclick=diagnosticsV13;
 $('exportDiagnostics').onclick=()=>{if(!diagnosticsExport.length){alert('Esegui prima l’analisi.');return}const rows=[['mercato','strategia','ingresso_utc','uscita_utc','prezzo_ingresso','prezzo_uscita','motivo','costi_stimati','profitto_netto'],...diagnosticsExport.map(x=>[x.pair,x.mode,new Date(x.entryTime).toISOString(),new Date(x.exitTime).toISOString(),x.entry,x.exit,x.why,x.fees,x.pnl])];const blob=new Blob(['﻿'+rows.map(r=>r.join(';')).join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='kraken-diagnostica-v1.3.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+// v1.6 — laboratorio intraday AUTOMATICO, esclusivamente virtuale.
+// Portafoglio separato dalla simulazione manuale e dal saldo Kraken reale.
+(() => {
+  const STORE='ktm_intraday_v16';
+  const WATCH=['BTC/USDC','ETH/USDC'];
+  const START=INITIAL, MAX_TRADE=10, MIN_CANDLES=60;
+  const defaultState=()=>({enabled:false,cash:START,position:null,trades:[],events:[],lastSignal:{},lastProcessed:{}});
+  let auto;
+  try { const raw=JSON.parse(localStorage.getItem(STORE)); auto={...defaultState(),...(raw&&typeof raw==='object'?raw:{})}; }
+  catch { auto=defaultState(); }
+  // Riavvio sempre in pausa: nessuna operazione autonoma dopo il caricamento della pagina.
+  auto.enabled=false;
+  const save=()=>{try{localStorage.setItem(STORE,JSON.stringify(auto));}catch(e){console.warn('Salvataggio intraday non disponibile',e);}};
+  const log=s=>{auto.events.unshift(new Date().toLocaleString('it-IT')+' · '+s);auto.events=auto.events.slice(0,35);};
+  const section=document.createElement('section');section.className='panel ranking-panel';
+  section.innerHTML=`<div class="heading"><h2>Laboratorio intraday v1.6 · SOLO SIMULAZIONE</h2><span id="autoStatus" class="pill neutral">In pausa</span></div>
+    <p class="foot">BTC/USDC ed ETH/USDC; ingresso solo dopo una candela da 5 minuti chiusa, conferma su 12 candele da 5 minuti (proxy di trend orario, NON candele OHLC a 1 ora). Una sola posizione virtuale, massimo 10 USDC. Il monitor deve restare aperto. Nessun ordine Kraken.</p>
+    <div class="actions"><button id="autoStart" class="secondary" type="button">Avvia simulazione automatica</button><button id="autoStop" class="secondary" type="button" disabled>Metti in pausa</button><button id="autoExport" class="secondary" type="button">Esporta CSV</button><button id="autoReset" class="danger" type="button">Azzera solo laboratorio</button></div>
+    <div id="autoSummary" class="preview" role="status" aria-live="polite"></div>
+    <h3>Operazioni simulate (ultime 30)</h3><div class="tablewrap"><table><thead><tr><th>Ora</th><th>Mercato</th><th>Evento</th><th>Prezzo</th><th>Importo</th><th>P/L netto</th><th>Motivo</th></tr></thead><tbody id="autoTrades"></tbody></table></div>
+    <h3>Registro segnali</h3><div id="autoLog" class="preview">Nessun segnale registrato.</div>
+    <p class="foot">Risultati indicativi: prezzi ticker, spread e slippage reali non verificati; stop e target non garantiti. Il laboratorio non funziona a pagina chiusa e non è un backtest. Non è una raccomandazione di investimento.</p>`;
+  const main=document.querySelector('main');if(main)main.insertBefore(section,main.firstChild);
+  const $a=id=>document.getElementById(id);
+  const rate=()=>costRate();
+  const closedRows=p=>[...market[p].ohlc.entries()].filter(([t,c])=>t+300000<=Date.now()&&[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(v)&&v>0)).sort((a,b)=>a[0]-b[0]);
+  const portfolio=()=>auto.cash+(auto.position&&market[auto.position.pair].price?auto.position.qty*market[auto.position.pair].price*(1-rate()):auto.position?auto.position.amount:0);
+  function display(){
+    $a('autoStatus').textContent=auto.enabled?'Simulazione attiva':'In pausa';$a('autoStatus').className='pill '+(auto.enabled?'up':'neutral');
+    $a('autoStart').disabled=auto.enabled;$a('autoStop').disabled=!auto.enabled;
+    const sold=auto.trades.filter(t=>t.event==='VENDITA SIM.');
+    const today=new Date().toLocaleDateString('it-IT');
+    const daily=sold.filter(t=>new Date(t.time).toLocaleDateString('it-IT')===today);
+    const sum=xs=>xs.reduce((v,t)=>v+t.pnl,0);
+    const wins=sold.filter(t=>t.pnl>0).length;
+    const p=auto.position;
+    $a('autoSummary').textContent=`Liquidità virtuale: ${fmt(auto.cash)} USDC · Patrimonio stimato: ${fmt(portfolio())} USDC · P/L totale: ${fmt(portfolio()-START)} USDC\n`+
+      `Oggi: ${daily.length} vendite · P/L realizzato: ${fmt(sum(daily))} USDC · Totale: ${sold.length} vendite, ${wins} positive · P/L realizzato: ${fmt(sum(sold))} USDC\n`+
+      (p?`Posizione simulata: ${p.pair}, ${fmt(p.amount)} USDC, ingresso ${fmt(p.entry,5)}; stop ${fmt(p.stop,5)}, target ${fmt(p.take,5)}`:'Nessuna posizione simulata aperta.');
+    $a('autoTrades').innerHTML=auto.trades.slice(-30).reverse().map(t=>`<tr><td>${new Date(t.time).toLocaleString('it-IT')}</td><td>${t.pair}</td><td>${t.event}</td><td>${fmt(t.price,5)}</td><td>${fmt(t.amount)}</td><td>${t.pnl===null?'—':fmt(t.pnl)}</td><td>${t.reason}</td></tr>`).join('')||'<tr><td colspan="7">Nessuna operazione automatica simulata.</td></tr>';
+    $a('autoLog').textContent=auto.events.slice(0,12).join('\n')||'Nessun segnale registrato.';
+  }
+  function exit(price,reason){
+    const p=auto.position;if(!p)return;
+    const proceeds=p.qty*price*(1-rate());const pnl=proceeds-p.amount;
+    auto.cash+=proceeds;auto.trades.push({time:Date.now(),pair:p.pair,event:'VENDITA SIM.',price,amount:proceeds,pnl,reason});
+    log(`${p.pair}: uscita simulata (${reason}), P/L ${fmt(pnl)} USDC`);auto.position=null;save();
+  }
+  function tick(){
+    if(!auto.enabled)return;
+    // Se il feed è vecchio, non operare. Non usare prezzi di altri mercati come surrogati.
+    if(auto.position){
+      const p=auto.position,m=market[p.pair];
+      if(m.price>0&&Date.now()-lastPairUpdate[p.pair]<=STALE_MS){
+        if(m.price<=p.stop)exit(m.price,'Stop (ticker, possibile gap)');
+        else if(m.price>=p.take)exit(m.price,'Target (ticker)');
+      }
+    }
+    for(const pair of WATCH){
+      const rows=closedRows(pair),last=rows.at(-1);if(!last||rows.length<MIN_CANDLES)continue;
+      const stamp=last[0];if(auto.lastProcessed[pair]===stamp)continue;
+      auto.lastProcessed[pair]=stamp;
+      const m=market[pair],closes=rows.slice(-55).map(x=>x[1].close);
+      const ma8=closes.slice(-8).reduce((a,b)=>a+b,0)/8;
+      const ma21=closes.slice(-21).reduce((a,b)=>a+b,0)/21;
+      const rv=rsi(closes);
+      const hour=closes.slice(-12).reduce((a,b)=>a+b,0)/12;
+      const prior=closes.slice(-24,-12).reduce((a,b)=>a+b,0)/12;
+      const signal=ma8>ma21&&rv>=48&&rv<=68&&hour>prior&&closes.at(-1)>hour;
+      if(!signal)continue;
+      const expected=netAtMove(MAX_TRADE,settings.take),risk=netAtMove(MAX_TRADE,-settings.stop);
+      const eligible=expected>0&&risk<0&&expected/(-risk)>=1.2;
+      if(!eligible){log(`${pair}: segnale scartato, costi o rapporto rendimento/rischio insufficienti`);continue;}
+      if(auto.position){log(`${pair}: segnale osservato, posizione già aperta`);continue;}
+      if(!(m.price>0)||Date.now()-lastPairUpdate[pair]>STALE_MS){log(`${pair}: segnale scartato, ticker non aggiornato`);continue;}
+      const amount=Math.min(MAX_TRADE,auto.cash);
+      if(amount<5){log('Liquidità simulata insufficiente per nuova operazione');continue;}
+      const r=rate(),qty=amount*(1-r)/m.price;
+      auto.cash-=amount;
+      auto.position={pair,qty,amount,entry:m.price,stop:m.price*(1-settings.stop/100),take:m.price*(1+settings.take/100)};
+      auto.trades.push({time:Date.now(),pair,event:'ACQUISTO SIM.',price:m.price,amount,pnl:null,reason:'Segnale 5m + filtro trend 1h proxy'});
+      log(`${pair}: acquisto virtuale ${fmt(amount)} USDC, nessun ordine reale`);
+      break;
+    }
+    save();display();
+  }
+  $a('autoStart').onclick=()=>{auto.enabled=true;log('Laboratorio avviato manualmente');save();tick();display();};
+  $a('autoStop').onclick=()=>{auto.enabled=false;log('Laboratorio in pausa; eventuale posizione virtuale rimane aperta');save();display();};
+  $a('autoReset').onclick=()=>{if(!confirm('Azzerare SOLTANTO il laboratorio intraday? La simulazione manuale e il saldo Kraken reale non cambiano.'))return;auto=defaultState();save();display();};
+  $a('autoExport').onclick=()=>{
+    const rows=[['ora_utc','mercato','evento','prezzo','importo_usdc','pnl_netto_usdc','motivo'],...auto.trades.map(t=>[new Date(t.time).toISOString(),t.pair,t.event,t.price,t.amount,t.pnl??'',t.reason])];
+    const blob=new Blob(['\ufeff'+rows.map(row=>row.join(';')).join('\n')],{type:'text/csv;charset=utf-8'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='kraken-intraday-simulato-v1.6.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+  display();setInterval(()=>{try{tick();}catch(e){console.error('Laboratorio intraday:',e);auto.enabled=false;log('Errore interno: simulazione messa in pausa');save();display();}},REFRESH_MS);
+})();
