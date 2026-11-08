@@ -9,8 +9,8 @@ const set = (label, cls = 'neutral') => {
 };
 const msg = value => { $('authMessage').textContent = value; };
 const form = $('authForm');
-const validateButton = $('validateOrder');
-const validationResult = $('validationResult');
+const validateButton = null;
+const validationResult = null;
 const logout = $('authLogout');
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 const configured = /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SUPABASE_URL) &&
@@ -53,6 +53,42 @@ if (!configured) {
       return payload;
     }
 
+    async function liveRequest(payload) {
+      const {data:userData,error:userError}=await client.auth.getUser();
+      if(userError||!userData.user)throw Error('Accedi nuovamente');
+      const {data:{session}}=await client.auth.getSession();
+      if(!session?.access_token)throw Error('Sessione scaduta');
+      const r=await fetch(SUPABASE_URL+'/functions/v1/kraken-live',{
+        method:'POST',headers:{Authorization:'Bearer '+session.access_token,apikey:SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify(payload),cache:'no-store'
+      });
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok||j.success!==true)throw Error((j.error||'Richiesta non riuscita')+' (HTTP '+r.status+')');
+      return j;
+    }
+    let pending=null;
+    const prepare=$('prepareOrder'),confirm=$('confirmLive'),cancel=$('cancelLive'),details=$('liveDetails'),panel=$('liveConfirmation'),result=$('liveResult');
+    if(prepare)prepare.addEventListener('click',async()=>{
+      const choice=window.krakenSelectedOrder;
+      if(!choice)return;
+      prepare.disabled=true;pending=null;panel.hidden=true;result.textContent='Controllo prezzo, saldo e validazione Kraken…';
+      try{
+        const p=await liveRequest({action:'preview',...choice});pending=p;
+        details.textContent=`ORDINE REALE DA CONFERMARE\n${p.side.toUpperCase()} ${p.pair}\nPrezzo limite: ${p.price}\nQuantità: ${p.volume}\nControvalore: ${p.notionalUSDC} USDC\nScade: ${new Date(p.expiresAt).toLocaleTimeString('it-IT')}`;
+        panel.hidden=false;result.textContent='Ordine validato, in attesa della tua conferma.';
+      }catch(e){result.textContent='Preparazione fallita: '+e.message}
+      finally{prepare.disabled=false}
+    });
+    if(cancel)cancel.onclick=()=>{pending=null;panel.hidden=true;result.textContent='Operazione annullata. Nessun ordine inviato.'};
+    if(confirm)confirm.onclick=async()=>{
+      if(!pending)return;
+      const id=pending.id;pending=null;panel.hidden=true;confirm.disabled=true;
+      result.textContent='Invio ordine reale in corso. NON ripetere la richiesta.';
+      try{const p=await liveRequest({action:'execute',id});result.textContent='Ordine inviato a Kraken. TXID: '+(p.txid||[]).join(', ')+'. Controlla subito gli ordini aperti su Kraken.';}
+      catch(e){result.textContent='ATTENZIONE: '+e.message+' Controlla gli ordini su Kraken prima di riprovare.'}
+      finally{confirm.disabled=false;window.krakenReadBalance?.().catch(()=>{});}
+    };
+
     async function show() {
       const { data: { session } } = await client.auth.getSession();
       const active = !!session;
@@ -62,7 +98,7 @@ if (!configured) {
       if (!active && validationResult) validationResult.textContent = 'Nessun ordine validato.';
       set(active ? 'Autenticato' : 'Non autenticato', active ? 'up' : 'neutral');
       msg(active
-        ? 'Connesso a Supabase. Saldo in sola lettura; trading reale disabilitato.'
+        ? 'Connesso a Supabase. Ordini reali solo con conferma esplicita.'
         : 'Accedi per leggere il saldo Kraken e verificare la connessione trading.');
       emit(active ? 'kraken-auth-ready' : 'kraken-auth-logout', {});
     }
