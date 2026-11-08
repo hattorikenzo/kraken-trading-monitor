@@ -79,7 +79,9 @@ if (!configured) {
       }catch(e){result.textContent='Preparazione fallita: '+e.message}
       finally{prepare.disabled=false}
     });
-    const check=$('checkOrders');if(check)check.addEventListener('click',async()=>{check.disabled=true;$('ordersStatus').textContent='Lettura ordini…';try{const q=await liveRequest({action:'status'});$('ordersStatus').textContent=`Ordini aperti: ${q.openCount}. Ultimi ordini del bot: ${q.intents.map(x=>x.side+' '+x.pair+' '+x.status+(x.txid?' '+x.txid:'')).join(' | ')||'nessuno'}. Controlla Kraken per le esecuzioni e gli eventuali parziali.`}catch(e){$('ordersStatus').textContent=e.message}finally{check.disabled=false}});
+    window.krakenReadPortfolio=async()=>{const q=await liveRequest({action:'status'});emit('kraken-portfolio',{holdings:q.holdings||{},openCount:q.openCount,at:Date.now()});return q;};
+    setInterval(()=>{if(!document.hidden)window.krakenReadPortfolio().catch(()=>{});},300000);
+    const check=$('checkOrders');if(check)check.addEventListener('click',async()=>{check.disabled=true;$('ordersStatus').textContent='Lettura ordini…';try{const q=await liveRequest({action:'status'});emit('kraken-portfolio',{holdings:q.holdings||{},openCount:q.openCount,at:Date.now()});$('ordersStatus').textContent=`Ordini aperti: ${q.openCount}. Ultimi ordini del bot: ${q.intents.map(x=>x.side+' '+x.pair+' '+x.status+(x.txid?' '+x.txid:'')).join(' | ')||'nessuno'}. Controlla Kraken per le esecuzioni e gli eventuali parziali.`}catch(e){$('ordersStatus').textContent=e.message}finally{check.disabled=false}});
     if(cancel)cancel.onclick=()=>{pending=null;panel.hidden=true;result.textContent='Operazione annullata. Nessun ordine inviato.'};
     if(confirm)confirm.onclick=async()=>{
       if(!pending)return;
@@ -102,6 +104,7 @@ if (!configured) {
         ? 'Connesso a Supabase. Ordini reali solo con conferma esplicita.'
         : 'Accedi per leggere il saldo Kraken e verificare la connessione trading.');
       emit(active ? 'kraken-auth-ready' : 'kraken-auth-logout', {});
+      if(active)setTimeout(()=>window.krakenReadPortfolio?.().catch(()=>{}),1500);
     }
 
     window.krakenReadBalance = async () => {
