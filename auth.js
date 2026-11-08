@@ -9,34 +9,18 @@ const set = (label, cls = 'neutral') => {
 };
 const msg = value => { $('authMessage').textContent = value; };
 const form = $('authForm');
-const check = $('authCheck');
-const tradeCheck = $('tradeCheck');
-const keyCheck = $('keyCheck');
-const keyStatus = $('keyStatus');
-const tradeStatus = $('tradeStatus');
+const validateButton = $('validateOrder');
+const validationResult = $('validationResult');
 const logout = $('authLogout');
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 const configured = /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SUPABASE_URL) &&
   typeof SUPABASE_PUBLISHABLE_KEY === 'string' && SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_');
 
-function showKeyStatus(value, cls = 'neutral') {
-  if (!keyStatus) return;
-  keyStatus.textContent = value;
-  keyStatus.className = 'pill ' + cls;
-}
-
-function showTradeStatus(value, cls = 'neutral') {
-  if (!tradeStatus) return;
-  tradeStatus.textContent = value;
-  tradeStatus.className = 'pill ' + cls;
-}
-
 if (!configured) {
   set('Configurazione mancante', 'down');
   msg('Controlla supabase-config.js (solo chiave pubblicabile).');
   form.hidden = true;
-  if (tradeCheck) tradeCheck.hidden = true;
-  if (keyCheck) keyCheck.hidden = true;
+  if (validateButton) validateButton.hidden = true;
 } else {
   try {
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
@@ -73,11 +57,9 @@ if (!configured) {
       const { data: { session } } = await client.auth.getSession();
       const active = !!session;
       form.hidden = active;
-      check.hidden = !active;
       logout.hidden = !active;
-      if (tradeCheck) tradeCheck.hidden = !active;
-      if (keyCheck) keyCheck.hidden = !active;
-      if (!active) { showTradeStatus('Non verificata'); showKeyStatus('Non verificata'); }
+      if (validateButton) validateButton.hidden = !active;
+      if (!active && validationResult) validationResult.textContent = 'Nessun ordine validato.';
       set(active ? 'Autenticato' : 'Non autenticato', active ? 'up' : 'neutral');
       msg(active
         ? 'Connesso a Supabase. Saldo in sola lettura; trading reale disabilitato.'
@@ -114,59 +96,20 @@ if (!configured) {
       }
     });
 
-    check.addEventListener('click', async () => {
-      check.disabled = true;
-      try {
-        const payload = await request('kraken-private', 'verify');
-        if (payload.mode !== 'read-only') throw Error('Modalità non verificata');
-        msg('Accesso privato verificato: sola lettura.');
-        set('Accesso verificato', 'up');
-      } catch (error) {
-        set('Verifica fallita', 'down');
-        msg(error instanceof Error ? error.message : 'Errore sconosciuto');
-      } finally {
-        check.disabled = false;
-      }
-    });
-
-    if (tradeCheck) {
-      tradeCheck.addEventListener('click', async () => {
-        tradeCheck.disabled = true;
-        showTradeStatus('Verifica in corso…');
+    if (validateButton) {
+      validateButton.addEventListener('click', async () => {
+        validateButton.disabled = true;
+        if (validationResult) validationResult.textContent = 'Validazione in corso con Kraken…';
         try {
-          const payload = await request('kraken-trade', 'verify');
-          if (payload.mode !== 'validation-only' || payload.executed !== false) {
-            throw Error('La funzione non conferma la modalità sicura di sola validazione');
-          }
-          showTradeStatus('Connessione verificata', 'up');
-          msg('kraken-trade raggiungibile e autenticata. Nessun ordine inviato a Kraken.');
+          const p = await request('kraken-trade', 'validate-demo');
+          if (p.mode !== 'validation-only' || p.executed !== false || p.success !== true)
+            throw Error('Risposta non sicura: impossibile confermare la sola validazione');
+          if (validationResult) validationResult.textContent =
+            `VALIDAZIONE RIUSCITA — NESSUN ACQUISTO\nMercato: ${p.pair}\nPrezzo limite: ${p.price} USDC\nQuantità: ${p.volume}\nImporto teorico: ${p.notionalUSDC} USDC\nSaldo disponibile: ${p.availableUSDC} USDC`;
         } catch (error) {
-          showTradeStatus('Verifica fallita', 'down');
-          msg(error instanceof Error ? error.message : 'Errore di verifica trading');
-        } finally {
-          tradeCheck.disabled = false;
-        }
-      });
-    }
-
-    if (keyCheck) {
-      keyCheck.addEventListener('click', async () => {
-        keyCheck.disabled = true;
-        showKeyStatus('Verifica in corso…');
-        try {
-          const payload = await request('kraken-trade', 'check-key');
-          if (payload.mode !== 'validation-only' || payload.executed !== false ||
-              payload.keyVerified !== true || payload.krakenConnected !== true) {
-            throw Error('Risposta di verifica della chiave non valida');
-          }
-          showKeyStatus('Chiave verificata', 'up');
-          msg('Nuova chiave Kraken verificata con BalanceEx. Nessun ordine inviato.');
-        } catch (error) {
-          showKeyStatus('Verifica fallita', 'down');
-          msg(error instanceof Error ? error.message : 'Errore verifica chiave');
-        } finally {
-          keyCheck.disabled = false;
-        }
+          if (validationResult) validationResult.textContent = 'Validazione non riuscita: ' +
+            (error instanceof Error ? error.message : 'Errore sconosciuto');
+        } finally { validateButton.disabled = false; }
       });
     }
 
@@ -178,13 +121,9 @@ if (!configured) {
     client.auth.onAuthStateChange((_event, session) => {
       const active = !!session;
       form.hidden = active;
-      check.hidden = !active;
       logout.hidden = !active;
-      if (tradeCheck) tradeCheck.hidden = !active;
-      if (keyCheck) keyCheck.hidden = !active;
+      if (validateButton) validateButton.hidden = !active;
       if (!active) {
-        showTradeStatus('Non verificata');
-        showKeyStatus('Non verificata');
         emit('kraken-auth-logout', {});
       }
     });
