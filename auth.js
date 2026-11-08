@@ -11,11 +11,19 @@ const msg = value => { $('authMessage').textContent = value; };
 const form = $('authForm');
 const check = $('authCheck');
 const tradeCheck = $('tradeCheck');
+const keyCheck = $('keyCheck');
+const keyStatus = $('keyStatus');
 const tradeStatus = $('tradeStatus');
 const logout = $('authLogout');
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 const configured = /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SUPABASE_URL) &&
   typeof SUPABASE_PUBLISHABLE_KEY === 'string' && SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_');
+
+function showKeyStatus(value, cls = 'neutral') {
+  if (!keyStatus) return;
+  keyStatus.textContent = value;
+  keyStatus.className = 'pill ' + cls;
+}
 
 function showTradeStatus(value, cls = 'neutral') {
   if (!tradeStatus) return;
@@ -28,6 +36,7 @@ if (!configured) {
   msg('Controlla supabase-config.js (solo chiave pubblicabile).');
   form.hidden = true;
   if (tradeCheck) tradeCheck.hidden = true;
+  if (keyCheck) keyCheck.hidden = true;
 } else {
   try {
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
@@ -67,7 +76,8 @@ if (!configured) {
       check.hidden = !active;
       logout.hidden = !active;
       if (tradeCheck) tradeCheck.hidden = !active;
-      if (!active) showTradeStatus('Non verificata');
+      if (keyCheck) keyCheck.hidden = !active;
+      if (!active) { showTradeStatus('Non verificata'); showKeyStatus('Non verificata'); }
       set(active ? 'Autenticato' : 'Non autenticato', active ? 'up' : 'neutral');
       msg(active
         ? 'Connesso a Supabase. Saldo in sola lettura; trading reale disabilitato.'
@@ -139,7 +149,28 @@ if (!configured) {
       });
     }
 
-    logout.addEventListener('click', async () => {
+    if (keyCheck) {
+      keyCheck.addEventListener('click', async () => {
+        keyCheck.disabled = true;
+        showKeyStatus('Verifica in corso…');
+        try {
+          const payload = await request('kraken-trade', 'check-key');
+          if (payload.mode !== 'validation-only' || payload.executed !== false ||
+              payload.keyVerified !== true || payload.krakenConnected !== true) {
+            throw Error('Risposta di verifica della chiave non valida');
+          }
+          showKeyStatus('Chiave verificata', 'up');
+          msg('Nuova chiave Kraken verificata con BalanceEx. Nessun ordine inviato.');
+        } catch (error) {
+          showKeyStatus('Verifica fallita', 'down');
+          msg(error instanceof Error ? error.message : 'Errore verifica chiave');
+        } finally {
+          keyCheck.disabled = false;
+        }
+      });
+    }
+
+    logout.addEventListener('click' , async () => {
       await client.auth.signOut();
       await show();
     });
@@ -150,8 +181,10 @@ if (!configured) {
       check.hidden = !active;
       logout.hidden = !active;
       if (tradeCheck) tradeCheck.hidden = !active;
+      if (keyCheck) keyCheck.hidden = !active;
       if (!active) {
         showTradeStatus('Non verificata');
+        showKeyStatus('Non verificata');
         emit('kraken-auth-logout', {});
       }
     });
