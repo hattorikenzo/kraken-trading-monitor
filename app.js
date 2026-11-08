@@ -297,3 +297,83 @@ $('exportDiagnostics').onclick=()=>{if(!diagnosticsExport.length){alert('Esegui 
   };
   save();display();setInterval(()=>{try{tick();}catch(e){console.error('Laboratorio intraday:',e);auto.enabled=false;log('Errore interno: simulazione messa in pausa');save();display();}},REFRESH_MS);
 })();
+
+// v2.0 — Assistente decisionale locale, senza API AI e SENZA ordini reali.
+// Le conferme registrano soltanto una proposta: nessuna chiamata Kraken privata.
+(() => {
+  const WATCH=['BTC/USDC','ETH/USDC'], STORE='ktm_advisor_v20';
+  const MAX_AMOUNT=10, INTERVAL=15000, MAX_AGE=30000;
+  const $b=id=>document.getElementById(id);
+  const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let store={history:[],dismissed:{}};
+  try {const old=JSON.parse(localStorage.getItem(STORE));if(old&&typeof old==='object')store={...store,...old};}catch{}
+  const save=()=>{try{localStorage.setItem(STORE,JSON.stringify(store));}catch{}};
+  const root=document.createElement('section');root.className='panel ranking-panel';
+  root.innerHTML=`<div class="heading"><h2>Assistente decisionale v2.0 · LONG / SHORT</h2><span id="advisorStatus" class="pill neutral">In attesa dati</span></div>
+    <p class="foot">Analisi quantitativa locale gratuita, non AI generativa. Controllo ogni 15 secondi, utilizzando candele da 5 minuti chiuse e ticker aggiornati. Nessun ordine reale: la conferma salva solo una proposta. Funziona mentre questa pagina è aperta.</p>
+    <div class="actions"><button id="advisorRefresh" class="secondary" type="button">Analizza ora</button><button id="advisorExport" class="secondary" type="button">Esporta decisioni CSV</button></div>
+    <div class="tablewrap"><table><thead><tr><th>Mercato</th><th>Direzione</th><th>Valutazione</th><th>Rischio netto</th><th>Target netto</th><th>Rapporto</th><th>Motivazione</th><th>Azione</th></tr></thead><tbody id="advisorRows"></tbody></table></div>
+    <h3>Registro decisioni</h3><div class="tablewrap"><table><thead><tr><th>Data e ora</th><th>Mercato</th><th>Direzione</th><th>Decisione</th></tr></thead><tbody id="advisorHistory"></tbody></table></div>
+    <p class="foot">Le perdite indicate sono scenari a stop teorico, non perdite massime garantite. Lo SHORT è solo un'ipotesi contabile senza leva: su Kraken spot non equivale a una vendita allo scoperto. Nessuna probabilità di successo inventata.</p>`;
+  const main=document.querySelector('main');if(main)main.insertBefore(root,main.firstChild);
+  let proposals={};
+  function record(pair,direction,message){store.history.unshift({time:Date.now(),pair,direction,message});store.history=store.history.slice(0,150);save();drawHistory();}
+  function drawHistory(){
+    $b('advisorHistory').innerHTML=store.history.slice(0,35).map(x=>`<tr><td>${new Date(x.time).toLocaleString('it-IT')}</td><td>${escapeHTML(x.pair)}</td><td>${escapeHTML(x.direction)}</td><td>${escapeHTML(x.message)}</td></tr>`).join('')||'<tr><td colspan="4">Nessuna decisione registrata.</td></tr>';
+  }
+  function evaluate(pair){
+    const m=market[pair], last=lastPairUpdate[pair], now=Date.now();
+    if(!(m.price>0)||now-last>MAX_AGE)return {pair,ready:false,why:'Ticker assente o non aggiornato'};
+    const bars=[...m.ohlc.entries()].filter(([t,c])=>t+300000<=now&&[c.open,c.high,c.low,c.close].every(x=>Number.isFinite(x)&&x>0)).sort((a,b)=>a[0]-b[0]);
+    if(bars.length<60)return {pair,ready:false,why:'Attendo almeno 60 candele chiuse da 5 minuti'};
+    const closes=bars.slice(-55).map(x=>x[1].close);
+    const avg=(arr)=>arr.reduce((a,b)=>a+b,0)/arr.length;
+    const fast=avg(closes.slice(-8)),slow=avg(closes.slice(-21)),rv=rsi(closes);
+    const hour=avg(closes.slice(-12)),prior=avg(closes.slice(-24,-12));
+    const long=fast>slow&&rv>=48&&rv<=68&&hour>prior&&closes.at(-1)>hour;
+    const short=fast<slow&&rv>=32&&rv<=52&&hour<prior&&closes.at(-1)<hour;
+    const direction=long?'LONG':short?'SHORT':'ATTENDI';
+    const rate=costRate(), stop=settings.stop/100,take=settings.take/100;
+    const amount=Math.min(MAX_AMOUNT,INITIAL);
+    const gainLong=amount*((1-rate)*(1+take)*(1-rate)-1);
+    const lossLong=amount*((1-rate)*(1-stop)*(1-rate)-1);
+    const gainShort=amount*(take-rate-rate*(1-take));
+    const lossShort=-amount*(stop+rate+rate*(1+stop));
+    const gain=direction==='SHORT'?gainShort:gainLong;
+    const loss=direction==='SHORT'?lossShort:lossLong;
+    const ratio=loss<0?gain/-loss:0;
+    const viable=direction!=='ATTENDI'&&gain>0&&loss<0&&ratio>=1.2;
+    const trend=fast>slow?'rialzista':'ribassista';
+    const why=direction==='ATTENDI'?`Segnali non concordi; RSI ${fmt(rv,1)}, trend ${trend}`:
+      `RSI ${fmt(rv,1)} · medie e filtro orario concordi${viable?'':' · costi o rendimento/rischio insufficienti'}`;
+    return {pair,ready:true,direction,viable,price:m.price,amount,gain,loss,ratio,why,stamp:bars.at(-1)[0]};
+  }
+  function refresh(){
+    const results=WATCH.map(evaluate);proposals={};
+    for(const x of results)if(x.ready&&x.viable)proposals[x.pair]=x;
+    $b('advisorStatus').textContent=results.every(x=>x.ready)?'Analisi attiva':'Dati incompleti';
+    $b('advisorStatus').className='pill '+(results.every(x=>x.ready)?'up':'neutral');
+    $b('advisorRows').innerHTML=results.map(x=>{
+      if(!x.ready)return `<tr><td><b>${x.pair}</b></td><td>—</td><td>ATTENDI</td><td>—</td><td>—</td><td>—</td><td colspan="2">${escapeHTML(x.why)}</td></tr>`;
+      const status=x.viable?'DA VALUTARE':'ATTENDI';
+      const action=x.viable?`<button class="secondary" type="button" data-advisor="${x.pair}">Esamina proposta</button>`:'—';
+      return `<tr><td><b>${x.pair}</b></td><td>${x.direction}</td><td>${status}</td><td class="down">${x.direction==='ATTENDI'?'—':fmt(x.loss)} USDC</td><td class="up">${x.direction==='ATTENDI'?'—':fmt(x.gain)} USDC</td><td>${x.direction==='ATTENDI'?'—':fmt(x.ratio,2)}</td><td>${escapeHTML(x.why)}</td><td>${action}</td></tr>`;
+    }).join('');
+    root.querySelectorAll('[data-advisor]').forEach(btn=>btn.onclick=()=>{
+      const x=proposals[btn.dataset.advisor];if(!x)return;
+      if(Date.now()-lastPairUpdate[x.pair]>MAX_AGE){alert('Prezzo non più aggiornato. Ripeti l’analisi.');refresh();return;}
+      const msg=`PROPOSTA TEORICA ${x.direction} ${x.pair}\nImporto: ${fmt(x.amount)} USDC\nPrezzo osservato: ${fmt(x.price,5)}\nTarget netto stimato: ${fmt(x.gain)} USDC\nPerdita allo stop teorico: ${fmt(x.loss)} USDC\nRapporto: ${fmt(x.ratio,2)}\n\nConfermare l’interesse per questa proposta? NON sarà inviato alcun ordine reale né simulato.`;
+      if(confirm(msg))record(x.pair,x.direction,`Interesse confermato · solo registrazione · prezzo ${fmt(x.price,5)} · nessun ordine inviato`);
+      else record(x.pair,x.direction,'Proposta non confermata');
+    });
+  }
+  $b('advisorRefresh').onclick=refresh;
+  $b('advisorExport').onclick=()=>{
+    const clean=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+    const rows=[['ora_utc','mercato','direzione','decisione'],...store.history.map(x=>[new Date(x.time).toISOString(),x.pair,x.direction,x.message])];
+    const csv='\ufeff'+rows.map(r=>r.map(clean).join(';')).join('\r\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='kraken-decisioni-v2.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+  drawHistory();refresh();setInterval(()=>{try{refresh();}catch(e){console.error('Assistente decisionale:',e);$b('advisorStatus').textContent='Errore analisi';}},INTERVAL);
+})();
