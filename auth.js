@@ -67,10 +67,10 @@ if (!configured) {
       return j;
     }
     let pending=null;
-    const prepare=$('prepareOrder'),manual=$('manualPrepare'),confirm=$('confirmLive'),cancel=$('cancelLive'),details=$('liveDetails'),panel=$('liveConfirmation'),result=$('liveResult');
+    const prepare=$('prepareOrder'),confirm=$('confirmLive'),cancel=$('cancelLive'),details=$('liveDetails'),panel=$('liveConfirmation'),result=$('liveResult');
     if(prepare)prepare.addEventListener('click',async()=>{
       const choice=window.krakenSelectedOrder;
-      if(!choice)return;
+      if(!choice){result.textContent='Il bot segnala ATTENDI: nessun ordine idoneo.';return;}
       prepare.disabled=true;pending=null;panel.hidden=true;result.textContent='Controllo prezzo, saldo e validazione Kraken…';
       try{
         const p=await liveRequest({action:'preview',...choice});pending=p;
@@ -79,16 +79,6 @@ if (!configured) {
       }catch(e){result.textContent='Preparazione fallita: '+e.message}
       finally{prepare.disabled=false}
     });
-    if(manual)manual.addEventListener('click',async()=>{
-      const pair=$('manualPair').value,side=$('manualSide').value,budgetUSDC=String($('manualBudget').value);
-      if(!confirmManual(pair,side,budgetUSDC))return;
-      manual.disabled=true;pending=null;panel.hidden=true;result.textContent='Controllo saldo disponibile, mercato e validazione Kraken…';
-      try{const q=await liveRequest({action:'preview',pair,side,budgetUSDC});pending=q;
-        details.textContent=`ORDINE SPOT REALE DA CONFERMARE\n${q.side.toUpperCase()} ${q.pair}\nPrezzo limite: ${q.price}\nQuantità: ${q.volume}\nControvalore: ${q.notionalUSDC} USDC\nScadenza: ${new Date(q.expiresAt).toLocaleTimeString('it-IT')}\nNessun profitto garantito.`;
-        panel.hidden=false;result.textContent='Validazione riuscita. L’ordine NON è stato inviato.';
-      }catch(e){result.textContent='Preparazione non riuscita: '+e.message}finally{manual.disabled=false}
-    });
-    function confirmManual(pair,side,budget){return window.confirm(`Vuoi PREPARARE (senza inviare) ${side==='buy'?'un acquisto':'una vendita'} di ${pair} per circa ${budget} USDC? La strategia può sbagliare e perdere denaro.`)}
     const check=$('checkOrders');if(check)check.addEventListener('click',async()=>{check.disabled=true;$('ordersStatus').textContent='Lettura ordini…';try{const q=await liveRequest({action:'status'});$('ordersStatus').textContent=`Ordini aperti: ${q.openCount}. Ultimi ordini del bot: ${q.intents.map(x=>x.side+' '+x.pair+' '+x.status+(x.txid?' '+x.txid:'')).join(' | ')||'nessuno'}. Controlla Kraken per le esecuzioni e gli eventuali parziali.`}catch(e){$('ordersStatus').textContent=e.message}finally{check.disabled=false}});
     if(cancel)cancel.onclick=()=>{pending=null;panel.hidden=true;result.textContent='Operazione annullata. Nessun ordine inviato.'};
     if(confirm)confirm.onclick=async()=>{
