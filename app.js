@@ -1,9 +1,9 @@
 'use strict';
-// Kraken Opportunity Bot v3: solo API pubbliche Kraken + evento saldo da auth.js. ZERO ordini.
+// Kraken Opportunity Bot v3.2: solo API pubbliche Kraken + evento saldo da auth.js. ZERO ordini.
 (()=>{
  const $=id=>document.getElementById(id), fmt=(x,n=4)=>Number.isFinite(x)?x.toLocaleString('it-IT',{maximumFractionDigits:n,minimumFractionDigits:n}):'—';
  const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- const API='https://api.kraken.com/0/public/', SCAN_MS=120000, MAX_OHLC=30, CONCURRENCY=4;
+ const API='https://api.kraken.com/0/public/', SCAN_MS=300000, MAX_OHLC=120, CONCURRENCY=3;
  let balance=null,balanceAt=0,balanceValid=false,scanning=false,pairs=[],lastResults=[],settings={maxTrade:10,fee:.8,slippage:.15};
  try{const x=JSON.parse(localStorage.getItem('kraken_bot_v3_settings'));if(x)settings={...settings,...x}}catch{}
  for(const k of ['maxTrade','fee','slippage'])$(k).value=settings[k];
@@ -13,7 +13,7 @@
   return entries.length?Number(entries[0][1]):null;
  }
  function showBalance(){const n=balanceValid?balance:null;$('realBalance').textContent=n===null?'—':fmt(n,6)+' USDC';$('balanceTime').textContent=balanceAt?new Date(balanceAt).toLocaleString('it-IT'):'Non ancora letto';$('budgetValue').textContent=n===null?'—':fmt(Math.min(settings.maxTrade,n),2)+' USDC';}
- window.addEventListener('kraken-balance',e=>{balance=getUsdc(e.detail?.balances);balanceAt=Date.parse(e.detail?.timestamp)||Date.now();balanceValid=balance!==null;showBalance();render();if(!scanning)void scan();});
+ window.addEventListener('kraken-balance',e=>{balance=getUsdc(e.detail?.balances);balanceAt=Date.parse(e.detail?.timestamp)||Date.now();balanceValid=balance!==null;showBalance();render();});
  window.addEventListener('kraken-auth-logout',()=>{balance=null;balanceValid=false;balanceAt=0;showBalance();render();});
  window.addEventListener('kraken-auth-ready',()=>{void readBalance()});
  async function readBalance(){if(typeof window.krakenReadBalance!=='function')return;const btn=$('refreshBalance');btn.disabled=true;try{await window.krakenReadBalance()}catch(e){balanceValid=false;balance=null;showBalance();$('decision').textContent='Saldo non verificato: '+e.message;console.warn(e)}finally{btn.disabled=false}}
@@ -43,23 +43,23 @@
   };
   return [make('LONG',long),make('SHORT',short)];
  }
- function render(){const tbody=$('opportunities');const sorted=lastResults.slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.ratio-a.ratio);const best=sorted.find(x=>x.eligible&&x.direction==='LONG');
-  tbody.innerHTML=sorted.slice(0,20).map(x=>`<tr><td>${esc(x.name)}</td><td>${x.direction}</td><td class="${x.eligible?'up':''}">${x.eligible?(x.direction==='SHORT'?'SOLO TEORICO':'DA VALUTARE'):'ATTENDI'}</td><td class="${x.gain>0?'up':'down'}">${fmt(x.gain)} USDC</td><td class="down">${fmt(x.loss)} USDC</td><td>${fmt(x.ratio,2)}</td><td>${fmt(x.spread,2)}%</td></tr>`).join('')||'<tr><td colspan="7">Nessuna analisi valida disponibile.</td></tr>';
+ function render(){const tbody=$('opportunities');const sorted=lastResults.slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.ratio-a.ratio||b.gain-a.gain);const best=sorted.find(x=>x.eligible&&x.direction==='LONG');const bestShort=sorted.find(x=>x.eligible&&x.direction==='SHORT');
+  tbody.innerHTML=sorted.filter(x=>x.signal).filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i).slice(0,5).map(x=>`<tr><td>${esc(x.name)}</td><td>${x.direction}</td><td class="${x.eligible?'up':''}">${x.eligible?(x.direction==='SHORT'?'SOLO TEORICO':'DA VALUTARE'):'ATTENDI'}</td><td class="${x.gain>0?'up':'down'}">${fmt(x.gain)} USDC</td><td class="down">${fmt(x.loss)} USDC</td><td>${fmt(x.ratio,2)}</td><td>${fmt(x.spread,2)}%</td></tr>`).join('')||'<tr><td colspan="7">Nessuna analisi valida disponibile.</td></tr>';
   const fresh=balanceValid&&Date.now()-balanceAt<5*60*1000;
   if(!fresh){$('decisionStatus').textContent='SALDO DA VERIFICARE';$('decision').textContent='Accedi e aggiorna il saldo reale Kraken. Senza saldo recente non vengono formulate proposte di importo.';return}
-  if(!best){$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun LONG spot supera tutti i filtri tra i mercati analizzati. Nessun investimento suggerito. Gli SHORT sono soltanto scenari teorici.';return}
-  $('decisionStatus').textContent='DA VALUTARE';$('decision').textContent=`Mercato: ${best.name}\nDirezione: LONG (spot)\nImporto di riferimento: ${fmt(best.amount,2)} USDC (saldo totale, disponibilità effettiva da verificare)\nPrezzo ask indicativo: ${fmt(best.ask,8)} USDC\nStop teorico: −${fmt(best.stopPct,2)}% · Target teorico: +${fmt(best.takePct,2)}%\nProfitto netto al target: ${fmt(best.gain)} USDC\nPerdita teorica allo stop: ${fmt(best.loss)} USDC\nRapporto target/stop: ${fmt(best.ratio,2)}\nRSI: ${fmt(best.rsi,1)} · ATR: ${fmt(best.atrPct,2)}% · Spread: ${fmt(best.spread,2)}%\nNessun ordine verrà inviato. Verifica disponibilità, prezzo e commissioni direttamente su Kraken prima di agire.`;
+  if(!best){$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun LONG spot supera i filtri di rischio e costo. '+(bestShort?'Segnale ribassista migliore: '+bestShort.name+' (SHORT teorico, non eseguibile in spot).':'Nessun segnale SHORT sufficientemente favorevole.')+' Nessun investimento suggerito.';return}
+  $('decisionStatus').textContent='DA VALUTARE';$('decision').textContent=`Mercato: ${best.name}\nDirezione: LONG (spot)\nImporto di riferimento: ${fmt(best.amount,2)} USDC (saldo totale, disponibilità effettiva da verificare)\nPrezzo ask indicativo: ${fmt(best.ask,8)} USDC\nStop teorico: −${fmt(best.stopPct,2)}% · Target teorico: +${fmt(best.takePct,2)}%\nProfitto netto al target: ${fmt(best.gain)} USDC\nPerdita teorica allo stop: ${fmt(best.loss)} USDC\nRapporto target/stop: ${fmt(best.ratio,2)}\nRSI: ${fmt(best.rsi,1)} · ATR: ${fmt(best.atrPct,2)}% · Spread: ${fmt(best.spread,2)}%\n${bestShort?'Miglior segnale ribassista: '+bestShort.name+' (SHORT teorico, non eseguibile in spot).\n':''}Nessun ordine verrà inviato. Verifica disponibilità, prezzo e commissioni direttamente su Kraken prima di agire.`;
  }
  async function scan(){if(scanning)return;scanning=true;$('scanNow').disabled=true;status('Analisi Kraken in corso…');try{
   const rawPairs=await api('AssetPairs');pairs=getPairs(rawPairs);$('marketCount').textContent=String(pairs.length);
   if(!pairs.length)throw Error('Nessuna coppia USDC online riconosciuta');
   const tickers={};for(let i=0;i<pairs.length;i+=45){try{Object.assign(tickers,await api('Ticker',{pair:pairs.slice(i,i+45).map(p=>p.id).join(',')}))}catch(e){console.warn('Ticker batch',i,e.message)}}const listed=tickerMap(tickers,pairs).filter(p=>p.spread<=1.5).sort((a,b)=>b.notional-a.notional);
-  const selected=listed.slice(0,MAX_OHLC);const amount=balanceValid?Math.min(settings.maxTrade,balance):0;
+  const selected=listed.slice(0,MAX_OHLC);const amount=balanceValid?Math.min(settings.maxTrade,10,balance):0;
   $('coverage').textContent=`${listed.length} con ticker e spread ≤1,5%; ${selected.length} analizzati su OHLC`;
   const results=[];let completed=0,failed=0;
   for(let i=0;i<selected.length;i+=CONCURRENCY){await Promise.all(selected.slice(i,i+CONCURRENCY).map(async p=>{try{const rows=await api('OHLC',{pair:p.id,interval:5});results.push(...analyze(p,rows,amount));completed++}catch(e){failed++;console.warn('OHLC',p.name,e.message)}}));}
-  lastResults=results;$('scanTime').textContent='Ultima analisi: '+new Date().toLocaleTimeString('it-IT');$('scanDetails').textContent=`Mercati USDC trovati: ${pairs.length}. Con ticker valido: ${listed.length}. OHLC interrogati: ${completed}/${selected.length}; errori: ${failed}. Solo i ${MAX_OHLC} più liquidi vengono analizzati in profondità; non è una scansione esaustiva di tutte le candele. Aggiornamento ogni 2 minuti a pagina aperta.`;
+  lastResults=results;$('scanTime').textContent='Ultima analisi: '+new Date().toLocaleTimeString('it-IT');$('scanDetails').textContent=`Mercati USDC trovati: ${pairs.length}. Con ticker valido: ${listed.length}. OHLC interrogati: ${completed}/${selected.length}; errori: ${failed}. Sono analizzati tutti i mercati con ticker valido entro il limite tecnico di ${MAX_OHLC}; le richieste fallite sono escluse. Aggiornamento ogni 5 minuti a pagina aperta.`;
   status('Analisi completata');render();
  }catch(e){status('Errore analisi');$('scanDetails').textContent='Kraken API: '+e.message;console.error(e)}finally{scanning=false;$('scanNow').disabled=false}}
- $('scanNow').onclick=()=>void scan();showBalance();render();void scan();setInterval(()=>void scan(),SCAN_MS);setInterval(()=>{if(balanceValid&&Date.now()-balanceAt>5*60*1000)render()},30000);
+ $('scanNow').onclick=()=>void scan();showBalance();render();void scan();setInterval(()=>void scan(),SCAN_MS);setInterval(()=>{if(balanceValid&&Date.now()-balanceAt>4*60*1000)void readBalance();else render()},60000);
 })();
