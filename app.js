@@ -5,11 +5,11 @@
  const fmt=(n,d=3)=>Number.isFinite(n)?n.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const API='https://api.kraken.com/0/public/', SCAN_MS=300000, MAX_OHLC=50, CONCURRENCY=3;
- const MAX_TRADE=10;
+ const MAX_TRADE=20;
  const FIAT=new Set(['USD','USDC','USDT','EUR','GBP','ZGBP','CHF','CAD','ZCAD','AUD','ZAUD','JPY','ZJPY','ZUSD','ZEUR','ZCHF','ZGBP','ZCAD','ZAR','BRL','TRY','PLN']);
  const isCrypto=s=>!FIAT.has(String(s).toUpperCase()); // limite del monitor; la funzione di validazione ha limiti propri.
  let balance=null,balanceAt=0,scanning=false,results=[],lastStats=''; let selectedLive=null; let holdings={},portfolioAt=0,openCount=null,heldSignals=[];
- let settings={maxTrade:10,fee:0.8,slippage:0.15}; let diagnostics=null;
+ let settings={maxTrade:20,fee:0.8,slippage:0.15}; let diagnostics=null;
  try{const s=JSON.parse(localStorage.getItem('kraken_bot_v3_settings'));if(s)settings={...settings,...s}}catch{}
  for(const k of ['maxTrade','fee','slippage'])if($(k))$(k).value=settings[k];
  const setStatus=s=>{$('status').textContent=s};
@@ -20,7 +20,7 @@
  window.addEventListener('kraken-auth-ready',()=>void readBalance());
  async function readBalance(){if(typeof window.krakenReadBalance!=='function')return;const b=$('refreshBalance');b.disabled=true;try{await window.krakenReadBalance()}catch(e){balance=null;balanceAt=0;showBalance();$('decision').textContent='Saldo non disponibile: '+e.message}finally{b.disabled=false}}
  $('refreshBalance').onclick=()=>void readBalance();
- $('saveSettings').onclick=()=>{const maxTrade=Number($('maxTrade').value),fee=Number($('fee').value),slippage=Number($('slippage').value);if(!Number.isFinite(maxTrade)||maxTrade<1||maxTrade>10||!Number.isFinite(fee)||fee<0||fee>5||!Number.isFinite(slippage)||slippage<0||slippage>5){alert('Importo 1–10 USDC; commissione e slippage 0–5%.');return}settings={maxTrade,fee,slippage};localStorage.setItem('kraken_bot_v3_settings',JSON.stringify(settings));showBalance();render()};
+ $('saveSettings').onclick=()=>{const maxTrade=Number($('maxTrade').value),fee=Number($('fee').value),slippage=Number($('slippage').value);if(!Number.isFinite(maxTrade)||maxTrade<1||maxTrade>20||!Number.isFinite(fee)||fee<0||fee>5||!Number.isFinite(slippage)||slippage<0||slippage>5){alert('Importo 1–20 USDC; commissione e slippage 0–5%.');return}settings={maxTrade,fee,slippage};localStorage.setItem('kraken_bot_v3_settings',JSON.stringify(settings));showBalance();render()};
  async function api(path,params={}){const url=new URL(API+path);Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,String(v)));const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),18000);try{const r=await fetch(url,{cache:'no-store',signal:ctrl.signal});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error?.length)throw Error(j.error.join('; '));return j.result||{}}finally{clearTimeout(timer)}}
  const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
  function rsi(c){if(c.length<16)return 50;let up=0,down=0;for(let i=c.length-14;i<c.length;i++){const d=c[i]-c[i-1];up+=Math.max(d,0);down+=Math.max(-d,0)}return down===0?(up?100:50):100-100/(1+up/down)}
@@ -51,11 +51,22 @@
   const eligible=trend&&metrics.ok&&gain>0&&loss<0&&ratio>=1.3&&spreadMax<=0.6&&route.length===1&&last.side==='buy'&&amount>=5; // I percorsi a due gambe restano osservazioni: target su una sola coppia non basta.
   return {name:route.at(-1).to,path:route.map(e=>e.market.name+' '+(e.side==='buy'?'acquista':'vendi')).join(' → '),route,direction,strategy,eligible,trend,amount,gain,loss,ratio,rv,atr,momentum,targetPct,stopPct,costPct:metrics.costPct,spreadMax,score:(trend?50:0)+Math.min(20,Math.max(0,momentum*4))+Math.max(0,20-metrics.costPct*5)+Math.min(10,ratio*3),why:route.length>1?'Rotazione: eseguire separatamente dopo verifica':!metrics.ok?'Importo inferiore ai minimi Kraken':!trend?'Trend non confermato':spreadMax>.6?'Spread superiore allo 0,6%':gain<=0?'Target inferiore ai costi':loss>=0||ratio<1.3?'Rapporto rischio/rendimento insufficiente':!eligible?'Non idoneo':'Candidato idoneo'};
  }
+ // Budget dinamico: utilizza soltanto segnali gia approvati, non trasforma segnali scartati in ordini.
+ function dynamicBudget(candidate){
+  const cap=Math.min(MAX_TRADE,Number(settings.maxTrade)||0,Math.max(0,Number(balance)||0)*0.90);
+  if(!candidate||!candidate.eligible||cap<5)return 0;
+  const strength=(Number(candidate.ratio)||0)>=2.5&&(Number(candidate.spreadMax)||100)<=0.25?20:
+    (Number(candidate.ratio)||0)>=1.8&&(Number(candidate.spreadMax)||100)<=0.4?15:
+    (Number(candidate.ratio)||0)>=1.5?10:5;
+  // 3% reserve on estimated available USDC, and preserve 10% of reported balance.
+  const usable=Math.floor(Math.min(strength,cap/1.03)*100)/100;
+  return usable>=5?usable:0;
+ }
  function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.gain-a.gain||b.score-a.score).slice(0,5);
   $('opportunities').innerHTML=top.map(x=>`<tr><td>${esc(x.name)}<small style="display:block">${x.route.length} scambio/i</small></td><td>${x.direction} <small style="display:block">${esc(x.strategy||'')}</small></td><td class="${x.eligible?'up':''}">${esc(x.why)}</td><td class="${x.gain>=0?'up':'down'}">${x.route.length>1?'n.d.':fmt(x.gain,3)+' USDC'}</td><td>${fmt(x.costPct,2)}%</td></tr>`).join('')||'<tr><td colspan="5">Nessun percorso analizzato.</td></tr>';
    const sell=heldSignals.find(x=>{const m=x.route[0].market;const held=Number(holdings[m.base]||0);return held*m.bid>=Math.max(2,m.costmin,m.ordermin*m.bid)});
    const safePortfolio=portfolioAt>0&&Date.now()-portfolioAt<300000&&openCount===0;
-   if(sell&&safePortfolio&&fresh){const m=sell.route[0].market;const held=Number(holdings[m.base]);const budget=Math.min(9.5,settings.maxTrade,held*m.bid*0.98);
+   if(sell&&safePortfolio&&fresh){const m=sell.route[0].market;const held=Number(holdings[m.base]);const budget=Math.min(20,settings.maxTrade,held*m.bid*0.98);
     if(budget>=Math.max(2,m.costmin,m.ordermin*m.bid)){
       window.krakenSelectedOrder={pair:m.name.replace('/',''),side:'sell',budgetUSDC:String(budget)};
       $('prepareOrder').disabled=false;$('decisionStatus').textContent='VENDITA DA VALUTARE';
@@ -63,16 +74,16 @@
       return;
     }
    }
-  const best=results.filter(x=>x.eligible && x.route.length===1 && x.route[0].side==='buy' && x.route[0].market.quote==='USDC').sort((a,b)=>b.gain-a.gain||b.score-a.score)[0]; selectedLive=best||null; window.krakenSelectedOrder=best?{pair:best.route[0].market.name.replace('/',''),side:'buy',budgetUSDC:String(Math.min(9.5,settings.maxTrade,balance||0))}:null; const orderBtn=$('prepareOrder');if(orderBtn)orderBtn.disabled=!best||!fresh||!safePortfolio;
+  const best=results.filter(x=>x.eligible && x.route.length===1 && x.route[0].side==='buy' && x.route[0].market.quote==='USDC').sort((a,b)=>b.gain-a.gain||b.score-a.score)[0]; selectedLive=best||null; const chosenBudget=dynamicBudget(best); window.krakenSelectedOrder=best&&chosenBudget>=5?{pair:best.route[0].market.name.replace('/',''),side:'buy',budgetUSDC:String(chosenBudget)}:null; const orderBtn=$('prepareOrder');if(orderBtn)orderBtn.disabled=!best||chosenBudget<5||!fresh||!safePortfolio;
   if(!fresh){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='SALDO DA VERIFICARE';$('decision').textContent='Accedi e aggiorna il saldo reale. Le analisi pubbliche sono disponibili, ma non formuliamo importi con saldo non recente.';return}
-  if(!best){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun acquisto approvato. '+(diagnostics?.summary||'Diagnostica non ancora disponibile.')+' Conservare USDC è una scelta valida; nessun ordine viene inviato.';return}
+  if(!best||chosenBudget<5){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun acquisto approvato. '+(diagnostics?.summary||'Diagnostica non ancora disponibile.')+' Conservare USDC è una scelta valida; nessun ordine viene inviato.';return}
   if(!safePortfolio){window.krakenSelectedOrder=null;$('prepareOrder').disabled=true;$('decisionStatus').textContent='PORTAFOGLIO DA VERIFICARE';$('decision').textContent='È disponibile un segnale, ma il portafoglio o gli ordini aperti non sono stati verificati recentemente. Premi Controlla ordini Kraken.';return}
-   $('decisionStatus').textContent='ACQUISTO DA VALUTARE';$('decision').textContent=`Strategia: ${best.strategy}\nDestinazione: ${best.name}\nPercorso: USDC → ${best.route.map(e=>e.to).join(' → ')}\nGambe: ${best.path}\nImporto di riferimento: ${fmt(best.amount,2)} USDC (saldo totale; disponibilità effettiva da verificare)\nCosto stimato di andata e ritorno: ${fmt(best.costPct,2)}%\nTarget teorico sul mercato finale: +${fmt(best.targetPct,2)}% · Stop teorico: −${fmt(best.stopPct,2)}%\nRisultato teorico al target: ${fmt(best.gain,3)} USDC · allo stop: ${fmt(best.loss,3)} USDC\nRSI: ${fmt(best.rv,1)} · Momentum 24h: ${fmt(best.momentum,2)}%\nATTENZIONE: il target riguarda l'ultima coppia e NON garantisce il risultato in USDC di un percorso multi-gamba. Prezzi, liquidità e minimi devono essere ricontrollati prima di qualunque scambio. Nessun ordine viene inviato.`;
+   $('decisionStatus').textContent='ACQUISTO DA VALUTARE';$('decision').textContent=`Strategia: ${best.strategy}\nDestinazione: ${best.name}\nPercorso: USDC → ${best.route.map(e=>e.to).join(' → ')}\nGambe: ${best.path}\nImporto scelto dal bot: ${fmt(chosenBudget,2)} USDC (saldo totale; disponibilità effettiva da verificare)\nCosto stimato di andata e ritorno: ${fmt(best.costPct,2)}%\nTarget teorico sul mercato finale: +${fmt(best.targetPct,2)}% · Stop teorico: −${fmt(best.stopPct,2)}%\nRisultato teorico al target: ${fmt(best.gain,3)} USDC · allo stop: ${fmt(best.loss,3)} USDC\nRSI: ${fmt(best.rv,1)} · Momentum 24h: ${fmt(best.momentum,2)}%\nATTENZIONE: il target riguarda l'ultima coppia e NON garantisce il risultato in USDC di un percorso multi-gamba. Prezzi, liquidità e minimi devono essere ricontrollati prima di qualunque scambio. Nessun ordine viene inviato.`;
  }
  async function scan(){if(scanning)return;scanning=true;results=[];diagnostics=null;selectedLive=null;window.krakenSelectedOrder=null;$('prepareOrder').disabled=true;$('scanNow').disabled=true;setStatus('Analisi di tutte le coppie spot…');try{
   const all=markets(await api('AssetPairs'));$('marketCount').textContent=String(all.length);
   // Ticker senza parametro pair: snapshot di tutti i mercati. Nessuna richiesta OHLC per migliaia di coppie.
-  const tickers=await api('Ticker');const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=balance!==null?Math.min(MAX_TRADE,settings.maxTrade,balance):Math.min(MAX_TRADE,settings.maxTrade);
+  const tickers=await api('Ticker');const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=balance!==null?Math.min(MAX_TRADE,settings.maxTrade,balance*0.9/1.03):Math.min(MAX_TRADE,settings.maxTrade);
   // Valutiamo TUTTI i percorsi a prezzi bid/ask, poi usiamo OHLC solo sui candidati più praticabili.
   const eligiblePaths=paths.map(path=>({path,metrics:routeMetrics(path,amount)})).filter(x=>x.metrics.ok&&x.metrics.costPct<5&&x.path.every(e=>e.market.spread<=1));
    // Diversificazione: non scegliere i 50 OHLC soltanto in base allo spread.
