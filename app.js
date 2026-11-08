@@ -1,5 +1,5 @@
 'use strict';
-// Kraken Opportunity Bot v3.6.0: scanner spot, esecuzione solo con conferma e blocco server.
+// Kraken Opportunity Bot v3.6.1: scanner spot, esecuzione solo con conferma e blocco server.
 (()=>{
  const $=id=>document.getElementById(id);
  const fmt=(n,d=3)=>Number.isFinite(n)?n.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
@@ -26,7 +26,7 @@
  function markets(raw){return Object.entries(raw).filter(([id,p])=>p&&p.status==='online'&&p.wsname?.includes('/')&&!p.wsname.includes('.d')&&p.base&&p.quote&&isCrypto(p.base)).map(([id,p])=>({id,name:p.wsname,base:p.base,quote:p.quote,ordermin:Number(p.ordermin)||0,costmin:Number(p.costmin)||0}));}
  function tickerFor(tickers,p){return tickers[p.id]||tickers[p.name.replace('/','')]||null}
  function graphFrom(list,tickers){const graph=new Map(),market=[];const add=(a,e)=>{if(!graph.has(a))graph.set(a,[]);graph.get(a).push(e)};
-  for(const p of list){const t=tickerFor(tickers,p);if(!t)continue;const bid=Number(t.b?.[0]),ask=Number(t.a?.[0]),last=Number(t.c?.[0]),volume=Number(t.v?.[1]);if(!(bid>0&&ask>=bid&&last>0&&volume>0))continue;const spread=100*(ask-bid)/((ask+bid)/2);if(spread>1.5)continue;const m={...p,bid,ask,last,volume,spread};market.push(m);
+  for(const p of list){const t=tickerFor(tickers,p);if(!t)continue;const bid=Number(t.b?.[0]),ask=Number(t.a?.[0]),last=Number(t.c?.[0]),volume=Number(t.v?.[1]);if(!(bid>0&&ask>=bid&&last>0&&volume>0))continue;const spread=100*(ask-bid)/((ask+bid)/2);if(spread>1.5)continue;const opening=Number(t.o),change24=opening>0?100*(last/opening-1):NaN;const m={...p,bid,ask,last,volume,spread,change24};market.push(m);
    add(p.quote,{from:p.quote,to:p.base,market:m,side:'buy',rate:1/ask});add(p.base,{from:p.base,to:p.quote,market:m,side:'sell',rate:bid});
   }return {graph,market};}
  // Le quotazioni per ogni lato sono già bid/ask. Nessun moltiplicatore spread aggiuntivo.
@@ -63,13 +63,30 @@
   const tickers=await api('Ticker');const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=balance!==null?Math.min(MAX_TRADE,settings.maxTrade,balance):Math.min(MAX_TRADE,settings.maxTrade);
   // Valutiamo TUTTI i percorsi a prezzi bid/ask, poi usiamo OHLC solo sui candidati più praticabili.
   const eligiblePaths=paths.map(path=>({path,metrics:routeMetrics(path,amount)})).filter(x=>x.metrics.ok&&x.metrics.costPct<5&&x.path.every(e=>e.market.spread<=1));
-  eligiblePaths.sort((a,b)=>a.metrics.costPct-b.metrics.costPct||b.path.at(-1).market.volume*b.path.at(-1).market.last-a.path.at(-1).market.volume*a.path.at(-1).market.last);
-  // Prima le coppie acquistabili direttamente in USDC: sono le sole eseguibili dal backend.
-  eligiblePaths.sort((a,b)=>Number(b.path.length===1&&b.path[0].side==='buy'&&b.path[0].market.quote==='USDC')-Number(a.path.length===1&&a.path[0].side==='buy'&&a.path[0].market.quote==='USDC')||a.metrics.costPct-b.metrics.costPct);
-  const selected=[],seen=new Set();for(const x of eligiblePaths){const id=x.path.at(-1).market.id;if(!seen.has(id)){seen.add(id);selected.push(x);if(selected.length===MAX_OHLC)break}}
+   // Diversificazione: non scegliere i 50 OHLC soltanto in base allo spread.
+   // Le variazioni 24h del ticker sono un filtro preliminare, NON segnali di acquisto.
+   const direct=eligiblePaths.filter(x=>x.path.length===1&&x.path[0].side==='buy'&&x.path[0].market.quote==='USDC');
+   const other=eligiblePaths.filter(x=>!(x.path.length===1&&x.path[0].side==='buy'&&x.path[0].market.quote==='USDC'));
+   const change24=x=>{const m=x.path.at(-1).market;return Number.isFinite(m.change24)?m.change24:0};
+   const liquidity=x=>{const m=x.path.at(-1).market;return m.quote==='USDC'?m.volume*m.last:0};
+   const selected=[],seen=new Set();
+   function addCandidates(pool,limit){for(const x of pool){const id=x.path.at(-1).market.id;if(seen.has(id))continue;seen.add(id);selected.push(x);if(selected.length>=limit)break}}
+   const byMomentum=[...direct].sort((a,b)=>change24(b)-change24(a));
+   const byDip=[...direct].filter(x=>change24(x)<0).sort((a,b)=>change24(a)-change24(b));
+   const byLiquidity=[...direct].sort((a,b)=>liquidity(b)-liquidity(a));
+   const byCost=[...direct].sort((a,b)=>a.metrics.costPct-b.metrics.costPct);
+   addCandidates(byMomentum,18);
+   addCandidates(byDip,30);
+   addCandidates(byLiquidity,42);
+   addCandidates(byCost,48);
+   // Le rotazioni sono monitorate soltanto come contesto, non abilitate al trading.
+   addCandidates([...other].sort((a,b)=>a.metrics.costPct-b.metrics.costPct),MAX_OHLC);
   $('coverage').textContent=`${market.length} ticker validi · ${paths.length} percorsi ≤2 scambi · ${selected.length} OHLC`;
   const found=[];let ok=0,errors=0;for(let i=0;i<selected.length;i+=CONCURRENCY){await Promise.all(selected.slice(i,i+CONCURRENCY).map(async x=>{try{const raw=await api('OHLC',{pair:x.path.at(-1).market.id,interval:60});const item=analyze(raw,x.path,amount);if(item)found.push(item);ok++}catch(e){errors++;console.warn('OHLC',x.path.at(-1).market.name,e.message)}}));}
-  results=found;lastStats=`Coppie spot attive: ${all.length}. Ticker validi con spread ≤1,5%: ${market.length}. Percorsi da USDC fino a 2 scambi: ${paths.length}; candidati con minimi/costi preliminari: ${eligiblePaths.length}. OHLC analizzati: ${ok}/${selected.length}; errori: ${errors}. Limite approfondimento: ${MAX_OHLC} mercati per ciclo. Non tutti gli asset hanno un percorso economicamente praticabile con 10 USDC. Analisi ogni 5 minuti.`;
+  results=found;
+  const diag={trend:0,minimi:0,spread:0,target:0,rischio:0,idonei:0,rotazioni:0};
+  for(const x of found){if(x.route.length>1){diag.rotazioni++;continue}if(!x.trend)diag.trend++;else if(!routeMetrics(x.route,x.amount).ok)diag.minimi++;else if(x.spreadMax>.6)diag.spread++;else if(x.gain<=0)diag.target++;else if(x.loss>=0||x.ratio<1.3)diag.rischio++;else if(x.eligible)diag.idonei++}
+  lastStats=`Coppie spot attive: ${all.length}. Ticker validi con spread ≤1,5%: ${market.length}. Percorsi da USDC fino a 2 scambi: ${paths.length}; candidati con minimi/costi preliminari: ${eligiblePaths.length}. OHLC analizzati: ${ok}/${selected.length}; errori: ${errors}. Limite approfondimento: ${MAX_OHLC} mercati per ciclo. Non tutti gli asset hanno un percorso economicamente praticabile con 10 USDC. Analisi ogni 5 minuti. Diagnostica su ${found.length} risultati: ${diag.idonei} idonei, ${diag.trend} senza trend, ${diag.minimi} sotto i minimi, ${diag.spread} con spread eccessivo, ${diag.target} con target insufficiente, ${diag.rischio} con rischio/rendimento insufficiente, ${diag.rotazioni} rotazioni solo teoriche. Campione: ${selected.filter(x=>x.path.length===1).length} mercati diretti USDC e ${selected.filter(x=>x.path.length>1).length} percorsi alternativi.`;
   $('scanDetails').textContent=lastStats;$('scanTime').textContent='Ultima analisi: '+new Date().toLocaleTimeString('it-IT');setStatus('Analisi completata');render();
  }catch(e){setStatus('Errore analisi');$('scanDetails').textContent='Errore API pubblica Kraken: '+e.message;console.error(e)}finally{scanning=false;$('scanNow').disabled=false}}
  $('scanNow').onclick=()=>void scan();showBalance();render();void scan();setInterval(()=>void scan(),SCAN_MS);setInterval(()=>{if(balance!==null&&Date.now()-balanceAt>240000)void readBalance();else render()},60000);
