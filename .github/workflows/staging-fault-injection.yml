@@ -1,0 +1,23 @@
+name: Kraken STAGING fault injection
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - staging/monitor-risk-alignment-20261113
+    paths:
+      - tests/staging_fault_injection.mjs
+      - .github/workflows/staging-fault-injection.yml
+permissions:
+  contents: read
+jobs:
+  fault-injection:
+    if: github.ref == 'refs/heads/staging/monitor-risk-alignment-20261113'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Simulate timeout, restart, duplicate and partial fills
+        run: node tests/staging_fault_injection.mjs
