@@ -108,6 +108,24 @@ if (!configured) {
       }catch(e){result.textContent='Preparazione fallita: '+e.message}
       finally{prepare.disabled=false}
     });
+    const e2eButton=$('stagingE2eTest'),e2eStatus=$('stagingManualStatus');
+    if(e2eButton&&e2eStatus)e2eButton.addEventListener('click',async()=>{
+      e2eButton.disabled=true;e2eStatus.textContent='Test E2E: chiamata Edge e verifica DB in corso…';
+      try{
+        const {data:{session}}=await client.auth.getSession();
+        if(!session?.access_token)throw Error('Devi accedere a Supabase');
+        const response=await fetch(SUPABASE_URL+'/functions/v1/kraken-staging-e2e',{
+          method:'POST',headers:{Authorization:'Bearer '+session.access_token,apikey:SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json'},
+          body:JSON.stringify({action:'run-fault-injection',mode:'STAGING'})
+        });
+        const data=await response.json();
+        if(!response.ok||data.success!==true||data.passed!==14||data.total!==14||data.ordersSent!==0||data.realKrakenCalls!==0||data.liveCertified!==false)
+          throw Error((data.error||'Risposta di test non conforme')+' — superati '+(data.passed??'?')+'/'+(data.total??'?'));
+        e2eStatus.textContent='E2E SUPERATO: 14/14 — Edge + DB reale, Kraken simulato, zero ordini.';
+        window.alert(e2eStatus.textContent);
+      }catch(e){e2eStatus.textContent='E2E NON SUPERATO: '+e.message;window.alert(e2eStatus.textContent)}
+      finally{e2eButton.disabled=false}
+    });
     const stagingButton=$('stagingManualTest'),stagingStatus=$('stagingManualStatus');
     if(stagingButton&&stagingStatus)stagingButton.addEventListener('click',async()=>{
       stagingStatus.hidden=false;
