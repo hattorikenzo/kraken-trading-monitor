@@ -176,6 +176,17 @@ Deno.serve(async req=>{
        pair,side:'buy',price,volume,maxFeeInclusiveDebitUSDC:debit,
        ordersSent:0,warning:'Reservation only. No Kraken AddOrder is performed.'});
    }
+   if(input.action==='staging-manual-confirmation'){
+     // Authenticated dry-run only. Deliberately no Kraken AddOrder, no RPC mutation.
+     // This verifies that the user intentionally submitted a confirmation.
+     if(input.confirmation!=='CONFERMO SOLO SIMULAZIONE')
+       return respond({success:false,error:'EXPLICIT_STAGING_CONFIRMATION_REQUIRED'},400);
+     if(input.mode!=='STAGING'||input.liveOrder===true)
+       return respond({success:false,error:'LIVE_ORDER_NOT_PERMITTED'},423);
+     return respond({success:true,mode:'STAGING',manualConfirmationReceived:true,
+       liveCertified:false,ordersSent:0,databaseWrites:0,
+       warning:'Conferma manuale registrata solo nella risposta di questa simulazione. Nessun ordine reale inviato.'});
+   }
    if(input.action==='certification-status'){
      // Read-only readiness contract. Never infer LIVE readiness from a browser flag.
      // The deployed LIVE execution path and operational SQL are NOT certified.
