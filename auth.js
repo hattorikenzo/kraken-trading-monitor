@@ -119,9 +119,9 @@ if (!configured) {
           body:JSON.stringify({action:'run-fault-injection',mode:'STAGING'})
         });
         const data=await response.json();
-        if(!response.ok||data.success!==true||data.passed!==14||data.total!==14||data.ordersSent!==0||data.realKrakenCalls!==0||data.liveCertified!==false)
+        if(!response.ok||data.success!==true||data.passed!==17||data.total!==17||data.ordersSent!==0||data.realKrakenCalls!==0||data.liveCertified!==false)
           throw Error((data.error||'Risposta di test non conforme')+' — superati '+(data.passed??'?')+'/'+(data.total??'?'));
-        e2eStatus.textContent='E2E SUPERATO: 14/14 — Edge + DB reale, Kraken simulato, zero ordini.';
+        e2eStatus.textContent='E2E SUPERATO: 17/17 — Edge + DB reale, Kraken simulato, zero ordini.';
         window.alert(e2eStatus.textContent);
       }catch(e){e2eStatus.textContent='E2E NON SUPERATO: '+e.message;window.alert(e2eStatus.textContent)}
       finally{e2eButton.disabled=false}
