@@ -122,8 +122,8 @@ if (!configured) {
         if(response.mode!=='STAGING'||response.liveCertified!==false||response.ordersSent!==0||
            response.databaseWrites!==0||response.manualConfirmationReceived!==true)
           throw Error('Risposta di sicurezza non conforme');
-        stagingStatus.textContent='TEST SUPERATO: conferma manuale ricevuta dal backend. 0 ordini reali, 0 scritture. LIVE ancora bloccato.';
-      }catch(e){stagingStatus.textContent='TEST NON SUPERATO: '+e.message}
+        stagingStatus.textContent='TEST SUPERATO: conferma ricevuta. 0 ordini reali, LIVE bloccato.';window.alert(stagingStatus.textContent);
+      }catch(e){stagingStatus.textContent='TEST NON SUPERATO: '+e.message;window.alert(stagingStatus.textContent)}
       finally{stagingButton.disabled=false;}
     });
     window.krakenReadPortfolio=async()=>{const q=await liveRequest({action:'status'});emit('kraken-portfolio',{holdings:q.holdings||{},openCount:q.openCount,at:Date.now()});return q;};
