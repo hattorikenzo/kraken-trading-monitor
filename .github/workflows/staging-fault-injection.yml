@@ -4,6 +4,7 @@ on:
     branches: [staging/monitor-risk-alignment-20261113]
     paths:
       - 'tests/staging_fault_injection.mjs'
+      - 'tests/kraken_reconcile_operational_regression.mjs'
       - '.github/workflows/staging-fault-injection.yml'
   workflow_dispatch:
 permissions:
