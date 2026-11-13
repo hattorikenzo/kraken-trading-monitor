@@ -115,11 +115,19 @@
   const notional=Math.floor(grossCap/estimatedMultiplier*100)/100;
   return notional>=2?notional:0;
  }
+ function analysisReport(){
+  const candidates=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||b.score-a.score).slice(0,5);
+  const lines=['ANALISI INFORMATIVA KRAKEN — NESSUN ORDINE','Generata: '+new Date().toLocaleString('it-IT'),'Dati pubblici scanner browser; non sono consulenza finanziaria.','Commissioni stimate per lato: '+settings.fee+'%; slippage: '+settings.slippage+'%.','Vincoli: spot, nessuna leva, massimo 5 USDC commissioni incluse, 5 USDC riserva, una posizione.'];
+  if(!candidates.length)lines.push('Nessun dato di mercato disponibile: ATTENDERE.');
+  candidates.forEach((x,i)=>lines.push((i+1)+'. '+x.name+' | idoneo='+Boolean(x.eligible)+' | '+String(x.strategy||'')+' | '+String(x.why||'')+' | RSI='+fmt(x.rv,1)+' | momentum24h='+fmt(x.momentum,2)+'% | costo A/R='+fmt(x.costPct,2)+'%'));
+  lines.push('Richiesta per Codex/ChatGPT: confronta i candidati, spiega rischio, spread, volatilità, costo e ragioni per ATTENDERE. Non inviare ordini e non chiedere credenziali.');
+  return lines.join('\\n');
+ }
  function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||Number(b.trend)-Number(a.trend)||b.score-a.score).slice(0,5);
   $('opportunities').innerHTML=top.map(x=>`<tr><td>${esc(x.name)}<small style="display:block">${x.route.length} scambio/i</small></td><td>${x.direction} <small style="display:block">${esc(x.strategy||'')}</small></td><td class="${x.eligible?'up':''}">${esc(x.why)}</td><td class="${x.gain>=0?'up':'down'}">${x.route.length>1?'n.d.':fmt(x.gain,3)+' USDC'}</td><td>${fmt(x.costPct,2)}%</td></tr>`).join('')||'<tr><td colspan="5">Nessun percorso analizzato.</td></tr>';
    const sell=heldSignals.find(x=>{const m=x.route[0].market;const held=Number(holdings[m.base]||0);return held*m.bid>=Math.max(2,m.costmin,m.ordermin*m.bid)});
    const safePortfolio=portfolioAt>0&&Date.now()-portfolioAt<300000&&openCount===0;
-   if(sell&&safePortfolio&&fresh){const m=sell.route[0].market;const held=Number(holdings[m.base]);const budget=Math.min(20,settings.maxTrade,held*m.bid*0.98);
+   if(sell&&safePortfolio&&fresh){const m=sell.route[0].market;const held=Number(holdings[m.base]);const budget=Math.min(MAX_TRADE,settings.maxTrade,held*m.bid*0.98);
     if(budget>=Math.max(2,m.costmin,m.ordermin*m.bid)){
       window.krakenSelectedOrder={pair:m.name.replace('/',''),side:'sell',budgetUSDC:String(budget)};
       $('prepareOrder').disabled=false;$('decisionStatus').textContent='VENDITA DA VALUTARE';
@@ -129,7 +137,7 @@
    }
   const best=results.filter(x=>x.eligible && x.route.length===1 && x.route[0].side==='buy' && x.route[0].market.quote==='USDC').sort((a,b)=>b.gain-a.gain||b.score-a.score)[0]; selectedLive=best||null; const chosenBudget=dynamicBudget(best); window.krakenSelectedOrder=best&&chosenBudget>=2?{pair:best.route[0].market.name.replace('/',''),side:'buy',budgetUSDC:String(chosenBudget)}:null; const orderBtn=$('prepareOrder');if(orderBtn)orderBtn.disabled=!best||chosenBudget<2||!fresh||!safePortfolio;
   if(!fresh){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='SALDO DA VERIFICARE';$('decision').textContent='Accedi e aggiorna il saldo reale. Le analisi pubbliche sono disponibili, ma non formuliamo importi con saldo non recente.';return}
-  if(!best||chosenBudget<5){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun acquisto approvato. '+(diagnostics?.summary||'Diagnostica non ancora disponibile.')+' Conservare USDC è una scelta valida; nessun ordine viene inviato.';return}
+  if(!best||chosenBudget<2){window.krakenSelectedOrder=null;if($('prepareOrder'))$('prepareOrder').disabled=true;$('decisionStatus').textContent='ATTENDI';$('decision').textContent='Nessun acquisto approvato. '+(diagnostics?.summary||'Diagnostica non ancora disponibile.')+' Conservare USDC è una scelta valida; nessun ordine viene inviato.';return}
   if(!safePortfolio){window.krakenSelectedOrder=null;$('prepareOrder').disabled=true;$('decisionStatus').textContent='PORTAFOGLIO DA VERIFICARE';$('decision').textContent='È disponibile un segnale, ma il portafoglio o gli ordini aperti non sono stati verificati recentemente. Premi Controlla ordini Kraken.';return}
    $('decisionStatus').textContent='ACQUISTO DA VALUTARE';$('decision').textContent=`Strategia: ${best.strategy}\nDestinazione: ${best.name}\nPercorso: USDC → ${best.route.map(e=>e.to).join(' → ')}\nGambe: ${best.path}\nImporto scelto dal bot: ${fmt(chosenBudget,2)} USDC (saldo totale; disponibilità effettiva da verificare)\nCosto stimato di andata e ritorno: ${fmt(best.costPct,2)}%\nScenario ipotetico sul mercato finale: +${fmt(best.targetPct,2)}% · Stop teorico: −${fmt(best.stopPct,2)}%\nRisultato ipotetico al target: ${fmt(best.gain,3)} USDC · allo stop: ${fmt(best.loss,3)} USDC\nRSI: ${fmt(best.rv,1)} · Momentum 24h: ${fmt(best.momentum,2)}%\nATTENZIONE: il target riguarda l'ultima coppia e NON garantisce il risultato in USDC di un percorso multi-gamba. Prezzi, liquidità e minimi devono essere ricontrollati prima di qualunque scambio. Nessun ordine viene inviato.`;
  }
@@ -207,5 +215,12 @@
    lastStats=`DIAGNOSTICA v3.8.0 — ${summary}\n\nCopertura: ${all.length} coppie spot, ${market.length} ticker validi, ${paths.length} percorsi da USDC; ${eligiblePaths.length} percorsi praticabili al controllo preliminare.\nAnalisi 1h: ${found.length} risultati validi su ${selected.length} richieste (mancanti/non validi: ${missedOHLC}; errori API: ${errors}). Conferme 15m: ${fastPool.filter(x=>x.fastChecked).length}/${fastPool.length}; errori: ${fastErrors}.\nMercati diretti USDC analizzati: ${directFound.length}; percorsi indiretti solo informativi: ${found.length-directFound.length}.\nLimite: ${MAX_OHLC} OHLC 1h e ${MAX_FAST} OHLC 15m per scansione ogni 5 minuti; non rappresenta l'intero mercato.\nImpostazioni: commissione stimata ${fmt(settings.fee,2)}% per lato, slippage ${fmt(settings.slippage,2)}% per lato; non sono necessariamente le commissioni reali del tuo account.\nPosizioni con segnale di vendita: ${heldSignals.length}.\nUn segnale non dimostra un profitto futuro. Nessun ordine automatico.`;
   $('scanDetails').textContent=lastStats;$('scanTime').textContent='Ultima analisi: '+new Date().toLocaleTimeString('it-IT');setStatus('Analisi completata');render();
  }catch(e){setStatus('Errore analisi');$('scanDetails').textContent='Errore API pubblica Kraken: '+e.message;console.error(e)}finally{scanning=false;$('scanNow').disabled=false}}
+ const analysisButton=$('exportAnalysis');
+ if(analysisButton)analysisButton.onclick=async()=>{
+   const report=analysisReport();
+   $('analysisText').textContent=report;
+   try{await navigator.clipboard.writeText(report);$('analysisStatus').textContent='Analisi copiata: incollala in Codex o ChatGPT.'}
+   catch{$('analysisStatus').textContent='Copia manualmente il testo qui sopra.'}
+ };
  $('scanNow').onclick=()=>void scan();showBalance();render();void scan();setInterval(()=>void scan(),SCAN_MS);setInterval(()=>{if(balance!==null&&Date.now()-balanceAt>240000)void readBalance();else render()},60000);
 })();
