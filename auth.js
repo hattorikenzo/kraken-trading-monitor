@@ -108,6 +108,24 @@ if (!configured) {
       }catch(e){result.textContent='Preparazione fallita: '+e.message}
       finally{prepare.disabled=false}
     });
+    const stagingButton=$('stagingManualTest'),stagingStatus=$('stagingManualStatus');
+    if(stagingButton&&stagingStatus)stagingButton.addEventListener('click',async()=>{
+      stagingStatus.hidden=false;
+      const choice=window.krakenSelectedOrder;
+      const description=choice?'Proposta corrente: '+JSON.stringify(choice):'Nessuna proposta attualmente idonea.';
+      const accepted=window.confirm('TEST DI CONFERMA MANUALE — SOLO SIMULAZIONE.\\n'+description+'\\n\\nConfermi di testare il pulsante? NON sarà inviato alcun ordine reale.');
+      if(!accepted){stagingStatus.textContent='Test annullato: nessun ordine inviato.';return;}
+      stagingButton.disabled=true;stagingStatus.textContent='Verifica autenticata della conferma STAGING…';
+      try{
+        const response=await liveRequest({action:'staging-manual-confirmation',
+          mode:'STAGING',confirmation:'CONFERMO SOLO SIMULAZIONE',liveOrder:false});
+        if(response.mode!=='STAGING'||response.liveCertified!==false||response.ordersSent!==0||
+           response.databaseWrites!==0||response.manualConfirmationReceived!==true)
+          throw Error('Risposta di sicurezza non conforme');
+        stagingStatus.textContent='TEST SUPERATO: conferma manuale ricevuta dal backend. 0 ordini reali, 0 scritture. LIVE ancora bloccato.';
+      }catch(e){stagingStatus.textContent='TEST NON SUPERATO: '+e.message}
+      finally{stagingButton.disabled=false;}
+    });
     window.krakenReadPortfolio=async()=>{const q=await liveRequest({action:'status'});emit('kraken-portfolio',{holdings:q.holdings||{},openCount:q.openCount,at:Date.now()});return q;};
     setInterval(()=>{if(!document.hidden)window.krakenReadPortfolio().catch(()=>{});},300000);
     const check=$('checkOrders');if(check)check.addEventListener('click',async()=>{check.disabled=true;$('ordersStatus').textContent='Lettura ordini…';try{const q=await liveRequest({action:'status'});emit('kraken-portfolio',{holdings:q.holdings||{},openCount:q.openCount,at:Date.now()});$('ordersStatus').textContent=`Ordini aperti: ${q.openCount}. Ultimi ordini del bot: ${q.intents.map(x=>x.side+' '+x.pair+' '+x.status+(x.txid?' '+x.txid:'')).join(' | ')||'nessuno'}. Controlla Kraken per le esecuzioni e gli eventuali parziali.`}catch(e){$('ordersStatus').textContent=e.message}finally{check.disabled=false}});
