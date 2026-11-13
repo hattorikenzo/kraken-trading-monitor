@@ -18,4 +18,6 @@ jobs:
         with:
           node-version: '22'
       - name: Simulate timeout, restart, duplicate and partial fills
-        run: node tests/staging_fault_injection.mjs
+        run: |
+          node tests/staging_fault_injection.mjs
+          node tests/kraken_reconcile_operational_regression.mjs
