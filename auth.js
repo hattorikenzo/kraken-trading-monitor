@@ -3,6 +3,11 @@
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './supabase-config.js';
 
 const $ = id => document.getElementById(id);
+// Fail closed until operational Supabase RPC + authoritative Kraken balance are certified.
+// UI gating is supplementary: the kraken-live Edge Function must enforce the same policy.
+let operationalLiveCertified = false;
+let operationalLiveStatusAt = 0;
+// Status is informational until the backend independently enforces it for preview AND execute.
 const set = (label, cls = 'neutral') => {
   $('authStatus').textContent = label;
   $('authStatus').className = 'pill ' + cls;
@@ -66,11 +71,35 @@ if (!configured) {
       if(!r.ok||j.success!==true)throw Error((j.error||'Richiesta non riuscita')+' (HTTP '+r.status+')');
       return j;
     }
+    async function checkOperationalLiveCertification() {
+      operationalLiveCertified=false;
+      operationalLiveStatusAt=0;
+      // Must be an authenticated, read-only server response. Never infer certification
+      // from localStorage, query parameters, UI controls or the existence of kraken-live.
+      const status=await liveRequest({action:'certification-status'});
+      if(status.mode!=='LIVE' || status.liveCertified!==true ||
+         status.manualConfirmationRequired!==true ||
+         status.spotOnly!==true ||
+         Number(status.maxBuyDebitUSDC)>5 ||
+         Number(status.minLiquidReserveUSDC)<5 ||
+         Number(status.maxBotPositions)!==1 ||
+         status.operationalRpcVerified!==true ||
+         status.atomicReservationVerified!==true ||
+         status.feeInclusiveCapVerified!==true)throw Error('Certificazione LIVE del backend assente o incompleta');
+      operationalLiveCertified=true;
+      operationalLiveStatusAt=Date.now();
+      return status;
+    }
+    function requireCertifiedLive() {
+      if(!operationalLiveCertified || Date.now()-operationalLiveStatusAt>60000)
+        throw Error('LIVE non certificato o verifica scaduta');
+    }
     let pending=null;
     const prepare=$('prepareOrder'),confirm=$('confirmLive'),cancel=$('cancelLive'),details=$('liveDetails'),panel=$('liveConfirmation'),result=$('liveResult');
     if(prepare)prepare.addEventListener('click',async()=>{
       const choice=window.krakenSelectedOrder;
       if(!choice){result.textContent='Il bot segnala ATTENDI: nessun ordine idoneo.';return;}
+      try{await checkOperationalLiveCertification();requireCertifiedLive()}catch(e){result.textContent='LIVE BLOCCATO: '+e.message;return;}
       prepare.disabled=true;pending=null;panel.hidden=true;result.textContent='Controllo prezzo, saldo e validazione Kraken…';
       try{
         const p=await liveRequest({action:'preview',...choice});pending=p;
@@ -79,12 +108,31 @@ if (!configured) {
       }catch(e){result.textContent='Preparazione fallita: '+e.message}
       finally{prepare.disabled=false}
     });
+    const stagingButton=$('stagingManualTest'),stagingStatus=$('stagingManualStatus');
+    if(stagingButton&&stagingStatus)stagingButton.addEventListener('click',async()=>{
+      stagingStatus.hidden=false;
+      const choice=window.krakenSelectedOrder;
+      const description=choice?'Proposta corrente: '+JSON.stringify(choice):'Nessuna proposta attualmente idonea.';
+      const accepted=window.confirm('TEST DI CONFERMA MANUALE — SOLO SIMULAZIONE.\\n'+description+'\\n\\nConfermi di testare il pulsante? NON sarà inviato alcun ordine reale.');
+      if(!accepted){stagingStatus.textContent='Test annullato: nessun ordine inviato.';return;}
+      stagingButton.disabled=true;stagingStatus.textContent='Verifica autenticata della conferma STAGING…';
+      try{
+        const response=await liveRequest({action:'staging-manual-confirmation',
+          mode:'STAGING',confirmation:'CONFERMO SOLO SIMULAZIONE',liveOrder:false});
+        if(response.mode!=='STAGING'||response.liveCertified!==false||response.ordersSent!==0||
+           response.databaseWrites!==0||response.manualConfirmationReceived!==true)
+          throw Error('Risposta di sicurezza non conforme');
+        stagingStatus.textContent='TEST SUPERATO: conferma manuale ricevuta dal backend. 0 ordini reali, 0 scritture. LIVE ancora bloccato.';
+      }catch(e){stagingStatus.textContent='TEST NON SUPERATO: '+e.message}
+      finally{stagingButton.disabled=false;}
+    });
     window.krakenReadPortfolio=async()=>{const q=await liveRequest({action:'status'});emit('kraken-portfolio',{holdings:q.holdings||{},openCount:q.openCount,at:Date.now()});return q;};
     setInterval(()=>{if(!document.hidden)window.krakenReadPortfolio().catch(()=>{});},300000);
     const check=$('checkOrders');if(check)check.addEventListener('click',async()=>{check.disabled=true;$('ordersStatus').textContent='Lettura ordini…';try{const q=await liveRequest({action:'status'});emit('kraken-portfolio',{holdings:q.holdings||{},openCount:q.openCount,at:Date.now()});$('ordersStatus').textContent=`Ordini aperti: ${q.openCount}. Ultimi ordini del bot: ${q.intents.map(x=>x.side+' '+x.pair+' '+x.status+(x.txid?' '+x.txid:'')).join(' | ')||'nessuno'}. Controlla Kraken per le esecuzioni e gli eventuali parziali.`}catch(e){$('ordersStatus').textContent=e.message}finally{check.disabled=false}});
-    if(cancel)cancel.onclick=()=>{pending=null;panel.hidden=true;result.textContent='Operazione annullata. Nessun ordine inviato.'};
+    if(cancel)cancel.onclick=()=>{operationalLiveCertified=false;pending=null;panel.hidden=true;result.textContent='Operazione annullata. Nessun ordine inviato.'};
     if(confirm)confirm.onclick=async()=>{
       if(!pending)return;
+      try{await checkOperationalLiveCertification();requireCertifiedLive()}catch(e){pending=null;panel.hidden=true;result.textContent='LIVE BLOCCATO: '+e.message;return;}
       const id=pending.id;pending=null;panel.hidden=true;confirm.disabled=true;
       result.textContent='Invio ordine reale in corso. NON ripetere la richiesta.';
       try{const p=await liveRequest({action:'execute',id});result.textContent='Ordine inviato a Kraken. TXID: '+(p.txid||[]).join(', ')+'. Controlla subito gli ordini aperti su Kraken.';}
@@ -164,6 +212,7 @@ if (!configured) {
       logout.hidden = !active;
       if (validateButton) validateButton.hidden = !active;
       if (!active) {
+        operationalLiveCertified=false;operationalLiveStatusAt=0;pending=null;panel.hidden=true;
         emit('kraken-auth-logout', {});
       }
     });
