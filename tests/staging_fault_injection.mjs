@@ -30,3 +30,5 @@ check('aggregated volume correct',()=>assert.equal(s.positions[0].quantity,4));
 check('overfill rejected',()=>assert.throws(()=>s.fill('ref1','trade3',.1,.1,.01),/OVERFILL/));
 check('completed order still blocked by position',()=>{s.intents[0].status='completed';assert.throws(()=>s.reserve('ref5'),/ORDER_ALREADY_IN_PROGRESS/)});
 console.log(JSON.stringify({mode:'STAGING_FAULT_INJECTION',passed:tests.length,total:tests.length,ordersSent:0,tests},null,2));
+
+// CI rerun: validate persistent-snapshot safety invariants on every STAGING change.
