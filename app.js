@@ -219,8 +219,16 @@
  if(analysisButton)analysisButton.onclick=async()=>{
    const report=analysisReport();
    $('analysisText').textContent=report;
-   try{await navigator.clipboard.writeText(report);$('analysisStatus').textContent='Analisi copiata: incollala in Codex o ChatGPT.'}
-   catch{$('analysisStatus').textContent='Copia manualmente il testo qui sopra.'}
+   // Codex does not expose a browser API to inject a prompt or execute an agent.
+   // Open its official UI only on user click; share the public-market summary via clipboard.
+   const codexWindow=window.open('https://chatgpt.com/codex','_blank','noopener,noreferrer');
+   try{
+     await navigator.clipboard.writeText(report);
+     $('analysisStatus').textContent='Riepilogo copiato. Incollalo in Codex per ottenere una valutazione: nessun ordine viene inviato.';
+   }catch{
+     $('analysisStatus').textContent='Codex aperto: copia il riepilogo espandendo la sezione qui sotto.';
+   }
+   if(!codexWindow)$('analysisStatus').textContent+=' Se la scheda non si apre, visita chatgpt.com/codex.';
  };
  $('scanNow').onclick=()=>void scan();showBalance();render();void scan();setInterval(()=>void scan(),SCAN_MS);setInterval(()=>{if(balance!==null&&Date.now()-balanceAt>240000)void readBalance();else render()},60000);
 })();
