@@ -3,6 +3,9 @@
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './supabase-config.js';
 
 const $ = id => document.getElementById(id);
+// Fail closed until operational Supabase RPC + authoritative Kraken balance are certified.
+// UI gating is supplementary: the kraken-live Edge Function must enforce the same policy.
+const OPERATIONAL_LIVE_CERTIFIED = false;
 const set = (label, cls = 'neutral') => {
   $('authStatus').textContent = label;
   $('authStatus').className = 'pill ' + cls;
@@ -71,6 +74,7 @@ if (!configured) {
     if(prepare)prepare.addEventListener('click',async()=>{
       const choice=window.krakenSelectedOrder;
       if(!choice){result.textContent='Il bot segnala ATTENDI: nessun ordine idoneo.';return;}
+      if(!OPERATIONAL_LIVE_CERTIFIED){result.textContent='LIVE BLOCCATO: protezioni Supabase operative non certificate.';return;}
       prepare.disabled=true;pending=null;panel.hidden=true;result.textContent='Controllo prezzo, saldo e validazione Kraken…';
       try{
         const p=await liveRequest({action:'preview',...choice});pending=p;
@@ -85,6 +89,7 @@ if (!configured) {
     if(cancel)cancel.onclick=()=>{pending=null;panel.hidden=true;result.textContent='Operazione annullata. Nessun ordine inviato.'};
     if(confirm)confirm.onclick=async()=>{
       if(!pending)return;
+      if(!OPERATIONAL_LIVE_CERTIFIED){pending=null;panel.hidden=true;result.textContent='LIVE BLOCCATO: backend non certificato.';return;}
       const id=pending.id;pending=null;panel.hidden=true;confirm.disabled=true;
       result.textContent='Invio ordine reale in corso. NON ripetere la richiesta.';
       try{const p=await liveRequest({action:'execute',id});result.textContent='Ordine inviato a Kraken. TXID: '+(p.txid||[]).join(', ')+'. Controlla subito gli ordini aperti su Kraken.';}
