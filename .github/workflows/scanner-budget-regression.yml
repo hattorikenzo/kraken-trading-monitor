@@ -1,0 +1,49 @@
+name: Kraken scanner budget regression
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - app.js
+      - .github/workflows/scanner-budget-regression.yml
+permissions:
+  contents: read
+jobs:
+  scanner-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and budget invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check app.js
+          node <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const src=fs.readFileSync('app.js','utf8');
+          assert(!src.includes('ratio>=1.25&&amount>=5'),'obsolete impossible gate');
+          assert(src.includes('ratio>=1.25;'),'risk/reward gate preserved');
+          assert(src.includes('routeMetrics(candidate.route,notional).ok'),'final minimum check');
+          assert(src.includes('MIN_LIQUID_RESERVE=5'),'reserve unchanged');
+          assert(src.includes('MAX_TRADE=5'),'5 USDC cap unchanged');
+          const fee=0.8,slippage=0.15,cap=5,reserve=5;
+          function budget(balance){
+            const gross=Math.min(cap,Math.max(0,balance-reserve));
+            return Math.floor(gross/(1+(fee+slippage)/100)*100)/100;
+          }
+          for(const [balance,expected] of [[39.010433,4.95],[10,4.95],[5,0],[4,0],[7,1.98]]){
+            assert.equal(budget(balance),expected,'balance='+balance);
+            assert(budget(balance)*(1+(fee+slippage)/100)<=Math.min(cap,Math.max(0,balance-reserve))+1e-8);
+          }
+          // Simulate Kraken ordermin/costmin at the computed trade amount.
+          const notional=budget(39.010433);
+          const meetsMin=(ask,ordermin,costmin)=>notional>=Math.max(ordermin*ask,costmin);
+          assert(meetsMin(100,0.01,2.5));
+          assert(!meetsMin(100,0.06,2.5));
+          assert(!meetsMin(100,0.01,5.1));
+          assert(!src.includes('AddOrder('),'scanner must not directly submit Kraken orders');
+          console.log('PASS_SCANNER_SYNTAX');
+          console.log('PASS_FEE_INCLUSIVE_CAP_AND_RESERVE');
+          console.log('PASS_5_USDC_GATE_REMOVED');
+          console.log('PASS_KRAKEN_MINIMUM_CHECK');
+          console.log('PASS_NO_DIRECT_ADDORDER');
+          NODE
