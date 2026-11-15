@@ -6,8 +6,8 @@
 </style></head><body><div class="shell"><a class="back" href="./index.html">← Torna al Kraken Opportunity Bot</a><h1>Mercato azionario <span class="pill">SOLO ANALISI · NESSUN ORDINE</span></h1>
 <p class="muted">Screener azionario multi-mercato, ricerca per simbolo e analisi assistita, separati dal bot crypto.</p>
 <p class="notice"><b>Azioni: esecuzione esclusivamente manuale.</b> Questo pannello non legge il conto titoli, non invia ordini, non usa API private e non modifica il kill switch crypto. Un ribasso non garantisce un recupero. I grafici esterni possono avere quotazioni differite.</p>
-<section class="panel"><h2>Screener azionario · mercati globali</h2><p class="muted">Esplora titoli e mercati disponibili nel widget del fornitore. Applica filtri per borsa, settore, variazione, volume e capitalizzazione. Copertura e ritardo dati dipendono dal fornitore: non equivale al catalogo negoziabile su Kraken.</p>
-<div class="tradingview-widget-container" style="min-height:570px"><div class="tradingview-widget-container__widget"></div></div>
+<section class="panel"><h2>Screener azionario · classifiche di mercato</h2><p class="muted">Esplora titoli e mercati disponibili nel widget del fornitore. Applica filtri per borsa, settore, variazione, volume e capitalizzazione. Copertura e ritardo dati dipendono dal fornitore: non equivale al catalogo negoziabile su Kraken.</p>
+<label>Classifica automatica del fornitore<select id="screen"><option value="most_capitalized">Maggior capitalizzazione</option><option value="top_gainers">Maggiori rialzi</option><option value="top_losers">Maggiori ribassi</option><option value="most_active">Più scambiate</option></select></label><label>Mercato di partenza<select id="market"><option value="america">Stati Uniti</option><option value="italy">Italia</option><option value="germany">Germania</option><option value="united_kingdom">Regno Unito</option><option value="france">Francia</option><option value="japan">Giappone</option></select></label><p class="muted">Classifica aggiornata dal fornitore esterno: non è una graduatoria AI né una raccomandazione di acquisto. La disponibilità dei mercati dipende dal widget.</p><div class="tradingview-widget-container" style="min-height:570px"><div class="tradingview-widget-container__widget"></div></div>
 <p class="links"><a href="https://www.tradingview.com/screener/" target="_blank" rel="noopener noreferrer">Apri screener globale e filtri avanzati</a><a href="https://www.tradingview.com/markets/stocks-worldwide/market-movers-gainers/" target="_blank" rel="noopener noreferrer">Maggiori rialzi</a><a href="https://www.tradingview.com/markets/stocks-worldwide/market-movers-losers/" target="_blank" rel="noopener noreferrer">Maggiori ribassi</a></p></section>
 <section class="panel"><h2>Analizza un titolo a scelta</h2><p class="muted">Digita un simbolo completo (ad esempio NASDAQ:NVDA, NYSE:KO, MIL:ENI). Non sono disponibili ordini da questa pagina.</p>
 <label>Simbolo del grafico<input id="chartSymbol" value="NASDAQ:NVDA" maxlength="50" placeholder="NASDAQ:NVDA"></label><button id="loadChart" type="button">Mostra grafico</button>
@@ -19,9 +19,18 @@
 <label>Note o prezzo d'acquisto già sostenuto (facoltativo)<textarea id="notes" placeholder="Es. vorrei acquistare dopo un ribasso del 5%"></textarea></label>
 <button id="copy" type="button">Copia richiesta per ChatGPT</button><p id="copyStatus" class="status muted" role="status"></p>
 </section><p class="muted">Il segnale AI (OK ACQUISTO / ATTENDI / NON ACQUISTARE) sarà un giudizio motivato dopo verifica dei dati, non una previsione certa. Eventuali operazioni su azioni o strumenti tokenizzati richiedono una verifica distinta di disponibilità, natura del prodotto e costi nell'account Kraken.</p></div>
-<script src="https://s3.tradingview.com/external-embedding/embed-widget-screener.js" async></script>
 <script>
-(function(){const el=document.querySelector('.tradingview-widget-container');const old=document.querySelector('script[src="https://s3.tradingview.com/external-embedding/embed-widget-screener.js"]');if(old)old.remove();const sc=document.createElement('script');sc.src='https://s3.tradingview.com/external-embedding/embed-widget-screener.js';sc.async=true;sc.textContent=JSON.stringify({width:"100%",height:540,defaultColumn:"overview",defaultScreen:"most_capitalized",market:"america",showToolbar:true,colorTheme:"dark",locale:"it"});el.appendChild(sc);})();
+function renderScreener(){
+ const el=document.querySelector('.tradingview-widget-container');
+ el.replaceChildren();
+ const widget=document.createElement('div');widget.className='tradingview-widget-container__widget';el.appendChild(widget);
+ const sc=document.createElement('script');sc.src='https://s3.tradingview.com/external-embedding/embed-widget-screener.js';sc.async=true;
+ sc.textContent=JSON.stringify({width:"100%",height:540,defaultColumn:"overview",defaultScreen:document.getElementById('screen').value,market:document.getElementById('market').value,showToolbar:true,colorTheme:"dark",locale:"it"});
+ el.appendChild(sc);
+}
+document.getElementById('screen').addEventListener('change',renderScreener);
+document.getElementById('market').addEventListener('change',renderScreener);
+renderScreener();
 document.getElementById('loadChart').addEventListener('click',()=>{const v=document.getElementById('chartSymbol').value.trim().toUpperCase();if(!/^[A-Z0-9._-]{1,20}:[A-Z0-9._-]{1,25}$/.test(v)){alert('Inserisci BORSA:SIMBOLO, ad esempio NASDAQ:NVDA');return;}document.getElementById('stockChart').src='https://s.tradingview.com/widgetembed/?symbol='+encodeURIComponent(v)+'&interval=D&theme=dark&style=1&locale=it&hide_top_toolbar=1';document.getElementById('ticker').value=v;});
 document.getElementById('copy').addEventListener('click',async()=>{
  const ticker=document.getElementById('ticker').value.trim().toUpperCase(),horizon=document.getElementById('horizon').value,price=document.getElementById('price').value.trim(),notes=document.getElementById('notes').value.trim();
