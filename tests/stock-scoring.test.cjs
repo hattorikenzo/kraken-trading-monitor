@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {scoreStock,parseCsv}=require('../stock-scoring.js');
+const base={symbol:'NASDAQ:NVDA',price:100,changePct:1,drawdownPct:10,rsi:45,volumeRatio:1.5,spreadPct:0.1,costPct:0.2};
+assert.equal(scoreStock(base).symbol,'NASDAQ:NVDA');
+assert.equal(scoreStock(base).signal,'CANDIDATO DA APPROFONDIRE');
+assert.equal(scoreStock({...base,changePct:-10}).signal,'ATTENDI / VERIFICA');
+assert.equal(scoreStock({...base,rsi:90}).signal,'ATTENDI / VERIFICA');
+assert.throws(()=>scoreStock({...base,price:''}),/mancanti/);
+assert.throws(()=>scoreStock({...base,symbol:'<script>'}),/Simbolo/);
+assert.throws(()=>scoreStock({...base,spreadPct:-1}),/intervallo/);
+const csv='symbol;price;changePct;drawdownPct;rsi;volumeRatio;spreadPct;costPct\nNASDAQ:NVDA;100;1;10;45;1.5;0.1;0.2\nNYSE:KO;bad;1;10;45;1.5;0.1;0.2';
+const out=parseCsv(csv);assert.equal(out.rows.length,1);assert.equal(out.errors.length,1);
+assert.throws(()=>parseCsv('bad;header\na;b'),/Intestazione/);
+assert.throws(()=>parseCsv('symbol;price;changePct;drawdownPct;rsi;volumeRatio;spreadPct;costPct\n'+Array(501).fill('NYSE:KO;100;1;10;45;1.5;0.1;0.2').join('\n')),/Massimo 500/);
+console.log('Stock scoring: 11 assertions PASS');
