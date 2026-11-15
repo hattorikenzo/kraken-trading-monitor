@@ -99,7 +99,7 @@
   const rebound=c.at(-1)>c.at(-4)&&c.at(-1)>f&&r>=35&&r<=65&&shortMove>0.1&&x.momentum<0;
   x.fastOk=momentum||rebound;
   x.strategy=momentum?'MOMENTUM 15m':rebound?'RIMBALZO 15m':x.strategy;
-  x.eligible=x.structural&&x.fastOk&&x.trend;
+  x.eligible=x.structural&&x.fastOk&&x.trend; // 15m informativo non aggira il filtro economico
   x.why=x.eligible?'Segnale 1h + 15m confermato':!x.structural?x.why:!x.trend?'Contesto orario non confermato':'Segnale 15m non confermato';
   x.score+=x.fastOk?25:0;
  }
@@ -126,7 +126,7 @@
   lines.push('RIEPILOGO: contesto tecnico 1h presente '+candidates.filter(x=>x.trend).length+'/'+candidates.length+'; segnale tecnico presente ma economia insufficiente '+techAndEconomics.length+'; conferme 15m eseguite '+candidates.filter(x=>x.fastChecked).length+'; idonei '+candidates.filter(x=>x.eligible).length+'.');
   candidates.forEach((x,i)=>{
     const economic=economicOk(x);
-    const stage=!x.trend?'NESSUN SEGNALE TECNICO 1h':!economic?'SEGNALE TECNICO PRESENTE → CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE':!x.structural?'FILTRO OPERATIVO NON SUPERATO → NESSUN ORDINE':!x.fastChecked?'ATTESA CONFERMA 15m → NESSUN ORDINE':!x.fastOk?'CONFERMA 15m NEGATIVA → NESSUN ORDINE':x.eligible?'CANDIDATO IDONEO — NON È UN ORDINE':'NON IDONEO → NESSUN ORDINE';
+    const stage=!x.trend?'NESSUN SEGNALE TECNICO 1h':!economic?(x.fastChecked?(x.fastOk?'SEGNALE 1h E 15m CONFERMATI → CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE':'SEGNALE 1h PRESENTE → 15m NON CONFERMATO → CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE'):'SEGNALE 1h PRESENTE → CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE'):!x.structural?'FILTRO OPERATIVO NON SUPERATO → NESSUN ORDINE':!x.fastChecked?'ATTESA CONFERMA 15m → NESSUN ORDINE':!x.fastOk?'CONFERMA 15m NEGATIVA → NESSUN ORDINE':x.eligible?'CANDIDATO IDONEO — NON È UN ORDINE':'NON IDONEO → NESSUN ORDINE';
     lines.push((i+1)+'. '+x.name+' | idoneo='+Boolean(x.eligible)+' | '+stage+' | strategia='+String(x.strategy||'')+' | motivo='+String(x.why||'')+' | RSI='+fmt(x.rv,1)+' | momentum24h='+fmt(x.momentum,2)+'% | ATR='+fmt(x.atr,2)+'% | target='+fmt(x.targetPct,2)+'% | stop='+fmt(x.stopPct,2)+'% | guadagno netto teorico='+fmt(x.gain,4)+' USDC | perdita netta teorica='+fmt(x.loss,4)+' USDC | rapporto netto='+fmt(x.ratio,3)+' (min 1,25) | spread='+fmt(x.spreadMax,3)+'% | costo A/R='+fmt(x.costPct,2)+'% | conferma15m='+String(x.fastChecked?(x.fastOk?'OK':'NO'):'NON ESEGUITA'));
   });
   lines.push('Richiesta per ChatGPT: valuta tutti i mercati elencati e la copertura effettiva, senza confondere i primi 5 con l’intero mercato. Non inviare ordini e non chiedere credenziali.');
@@ -184,12 +184,12 @@
   const found=[];let ok=0,errors=0;for(let i=0;i<selected.length;i+=CONCURRENCY){await Promise.all(selected.slice(i,i+CONCURRENCY).map(async x=>{try{const raw=await api('OHLC',{pair:x.path.at(-1).market.id,interval:60});const item=analyze(raw,x.path,amount);if(item){found.push(item);ok++}else errors++}catch(e){errors++;console.warn('OHLC',x.path.at(-1).market.name,e.message)}}));}
   // Seconda fase: fino a 15 candele 15m per i migliori mercati USDC diretti.
   // Mai scambiare un segnale basato solo sulla candela oraria.
-  const fastPool=found.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC'&&x.structural)
+  const fastPool=found.filter(x=>x.route.length===1&&x.route[0].side==='buy'&&x.route[0].market.quote==='USDC'&&(x.structural||x.trend))
     .sort((a,b)=>Number(b.trend)-Number(a.trend)||b.score-a.score).slice(0,MAX_FAST);
   let fastErrors=0;
   for(let i=0;i<fastPool.length;i+=CONCURRENCY){await Promise.all(fastPool.slice(i,i+CONCURRENCY).map(async x=>{
    try{const raw=await api('OHLC',{pair:x.route[0].market.id,interval:15});confirmFast(x,raw)}
-   catch(e){fastErrors++;x.why='Errore conferma 15m';console.warn('OHLC 15m',x.name,e.message)}
+   catch(e){fastErrors++;x.fastError=true;if(x.structural)x.why='Errore conferma 15m';console.warn('OHLC 15m',x.name,e.message)}
   }))}
   results=found;
   heldSignals=found.filter(x=>x.route.length===1&&x.route[0].side==='buy'&&x.route[0].market.quote==='USDC'&&Number(holdings[x.route[0].market.base]||0)>0)
@@ -223,7 +223,7 @@
     (bestRejected?' Miglior candidato escluso: '+bestRejected.name+' ('+bestRejected.why+', momentum '+fmt(bestRejected.momentum,2)+'%, costo stimato A/R '+fmt(bestRejected.costPct,2)+'%).':'')+
     (operational.length?' Controlli operativi da completare: '+operational.join(', ')+'.':'');
    diagnostics={summary,rejected,operational};
-   lastStats=`DIAGNOSTICA v3.8.0 — ${summary}\n\nCopertura: ${all.length} coppie spot, ${market.length} ticker validi, ${paths.length} percorsi da USDC; ${eligiblePaths.length} percorsi praticabili al controllo preliminare.\nAnalisi 1h: ${found.length} risultati validi su ${selected.length} richieste (mancanti/non validi: ${missedOHLC}; errori API: ${errors}). Conferme 15m: ${fastPool.filter(x=>x.fastChecked).length}/${fastPool.length}; errori: ${fastErrors}.\nMercati diretti USDC praticabili al filtro preliminare: ${direct.length}; analizzati con OHLC: ${directFound.length}; percorsi indiretti solo informativi: ${found.length-directFound.length}.\nLimite: ${MAX_OHLC} OHLC 1h e ${MAX_FAST} OHLC 15m per scansione ogni 5 minuti; eventuali coppie dirette oltre 50 ruotano tra scansioni. Nessun segnale sui mercati senza OHLC.\nImpostazioni: commissione stimata ${fmt(settings.fee,2)}% per lato, slippage ${fmt(settings.slippage,2)}% per lato; non sono necessariamente le commissioni reali del tuo account.\nPosizioni con segnale di vendita: ${heldSignals.length}.\nUn segnale non dimostra un profitto futuro. Nessun ordine automatico.`;
+   lastStats=`DIAGNOSTICA v3.9.0 STAGING — ${summary}\n\nCopertura: ${all.length} coppie spot, ${market.length} ticker validi, ${paths.length} percorsi da USDC; ${eligiblePaths.length} percorsi praticabili al controllo preliminare.\nAnalisi 1h: ${found.length} risultati validi su ${selected.length} richieste (mancanti/non validi: ${missedOHLC}; errori API: ${errors}). Analisi 15m (operative + informative): ${fastPool.filter(x=>x.fastChecked).length}/${fastPool.length}; informative: ${fastPool.filter(x=>x.trend&&!x.structural).length}; errori: ${fastErrors}. Nessun esito informativo abilita ordini.\nMercati diretti USDC praticabili al filtro preliminare: ${direct.length}; analizzati con OHLC: ${directFound.length}; percorsi indiretti solo informativi: ${found.length-directFound.length}.\nLimite: ${MAX_OHLC} OHLC 1h e ${MAX_FAST} OHLC 15m per scansione ogni 5 minuti; eventuali coppie dirette oltre 50 ruotano tra scansioni. Nessun segnale sui mercati senza OHLC.\nImpostazioni: commissione stimata ${fmt(settings.fee,2)}% per lato, slippage ${fmt(settings.slippage,2)}% per lato; non sono necessariamente le commissioni reali del tuo account.\nPosizioni con segnale di vendita: ${heldSignals.length}.\nUn segnale non dimostra un profitto futuro. Nessun ordine automatico.`;
   $('scanDetails').textContent=lastStats;$('scanTime').textContent='Ultima analisi: '+new Date().toLocaleTimeString('it-IT');setStatus('Analisi completata');render();
  }catch(e){setStatus('Errore analisi');$('scanDetails').textContent='Errore API pubblica Kraken: '+e.message;console.error(e)}finally{scanning=false;$('scanNow').disabled=false}}
  const analysisButton=$('exportAnalysis');
