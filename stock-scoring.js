@@ -4,6 +4,7 @@
  const symbolOk=s=>/^[A-Z0-9._-]{1,20}:[A-Z0-9._-]{1,25}$/.test(String(s||'').toUpperCase());
  function scoreStock(input){
   const symbol=String(input.symbol||'').trim().toUpperCase();
+  const required=['price','changePct','drawdownPct','rsi','volumeRatio','spreadPct','costPct'];if(required.some(k=>input[k]===undefined||input[k]===null||String(input[k]).trim()===''))throw Error('Valori numerici obbligatori mancanti');
   const price=Number(input.price),change=Number(input.changePct),drawdown=Number(input.drawdownPct),rsi=Number(input.rsi),volume=Number(input.volumeRatio),spread=Number(input.spreadPct),cost=Number(input.costPct);
   if(!symbolOk(symbol))throw Error('Simbolo BORSA:TICKER non valido');
   if(![price,change,drawdown,rsi,volume,spread,cost].every(Number.isFinite)||price<=0||change< -100||change>100||drawdown<0||drawdown>100||rsi<0||rsi>100||volume<0||volume>100||spread<0||spread>100||cost<0||cost>100)throw Error('Dati numerici mancanti o fuori intervallo');
