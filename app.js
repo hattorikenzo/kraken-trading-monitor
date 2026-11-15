@@ -83,7 +83,7 @@
   const loss=metrics.back*(1-stopPct/100)-amount;
   const ratio=loss<0?gain/-loss:0;
   const direct=route.length===1&&last.side==='buy'&&m.quote==='USDC';
-  const structural=direct&&metrics.ok&&spreadMax<=0.6&&gain>0&&loss<0&&ratio>=1.25&&amount>=5;
+  const structural=direct&&amount>0&&metrics.ok&&spreadMax<=0.6&&gain>0&&loss<0&&ratio>=1.25;
   // Un segnale a 15m chiuso è obbligatorio: i soli dati orari non autorizzano l'acquisto.
   return {name:last.to,path:route.map(e=>e.market.name+' '+(e.side==='buy'?'acquista':'vendi')).join(' → '),route,direction,
    strategy,eligible:false,trend,structural,fastChecked:false,fastOk:false,amount,gain,loss,ratio,rv,atr,momentum,targetPct,stopPct,
@@ -113,7 +113,7 @@
   const liquid=Math.max(0,Number(balance)-MIN_LIQUID_RESERVE);
   const grossCap=Math.min(MAX_TRADE,Number(settings.maxTrade)||0,liquid);
   const notional=Math.floor(grossCap/estimatedMultiplier*100)/100;
-  return notional>=2?notional:0;
+  return notional>=2&&routeMetrics(candidate.route,notional).ok?notional:0;
  }
  function analysisReport(){
   const candidates=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||b.score-a.score);
@@ -145,7 +145,7 @@
  async function scan(){if(scanning)return;scanning=true;results=[];diagnostics=null;selectedLive=null;window.krakenSelectedOrder=null;$('prepareOrder').disabled=true;$('scanNow').disabled=true;setStatus('Analisi di tutte le coppie spot…');try{
   const all=markets(await api('AssetPairs'));$('marketCount').textContent=String(all.length);
   // Ticker senza parametro pair: snapshot di tutti i mercati. Nessuna richiesta OHLC per migliaia di coppie.
-  const tickers=await api('Ticker');const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=balance!==null?Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance-MIN_LIQUID_RESERVE)/1.03):Math.min(MAX_TRADE,settings.maxTrade);
+  const tickers=await api('Ticker');const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance!==null?balance-MIN_LIQUID_RESERVE:MAX_TRADE)/(1+(Math.max(0,settings.fee)+Math.max(0,settings.slippage))/100));
   // Valutiamo TUTTI i percorsi a prezzi bid/ask, poi usiamo OHLC solo sui candidati più praticabili.
   const eligiblePaths=paths.map(path=>({path,metrics:routeMetrics(path,amount)})).filter(x=>x.metrics.ok&&x.metrics.costPct<5&&x.path.every(e=>e.market.spread<=1));
    // Diversificazione: non scegliere i 50 OHLC soltanto in base allo spread.
