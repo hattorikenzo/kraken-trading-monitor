@@ -20,5 +20,5 @@ async function fetchOne(symbol,key,costPct,signal){
  const url=new URL('https://api.twelvedata.com/time_series');url.searchParams.set('symbol',ticker);url.searchParams.set('interval','1day');url.searchParams.set('outputsize','110');url.searchParams.set('apikey',key);if(mapping[exchange])url.searchParams.set('exchange',mapping[exchange]);
  const response=await fetch(url.toString(),{signal,cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);const data=await response.json();return fromSeries(symbol,data,costPct);
 }
-root.StockFeed={validSymbols,fromSeries,fetchOne};
+if(typeof module!=='undefined'&&module.exports){module.exports={validSymbols,fromSeries,fetchOne};}else{root.StockFeed={validSymbols,fromSeries,fetchOne};}
 })(typeof module!=='undefined'&&module.exports?module.exports:window);
