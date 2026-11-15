@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101629"><title>Mercato azionario · Kraken Opportunity Bot</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#101629;color:#e8edf8;font:16px system-ui,Arial,sans-serif}.shell{max-width:1120px;margin:auto;padding:20px}a{color:#9fc4ff}.back{display:inline-block;margin-bottom:15px}.muted,small{color:#a9b9d2}.panel{background:#19243b;border:1px solid #34425c;border-radius:14px;padding:18px;margin:15px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:15px}.grid .panel{margin:0}.pill{display:inline-block;border-radius:30px;background:#34445f;padding:5px 10px;font-size:.8rem}.notice{border-left:3px solid #7caaff;padding:12px;background:#18233a}h1{margin:5px 0}h2{font-size:1.2rem}button{background:#3e80ff;border:0;border-radius:8px;color:white;padding:10px 15px;cursor:pointer}button:disabled{opacity:.5}input,textarea,select{width:100%;border:1px solid #60708d;background:#111b30;color:#fff;border-radius:7px;padding:9px;font:inherit}label{display:block;margin:10px 0;font-size:.9rem}textarea{min-height:110px}iframe{border:0;width:100%;height:380px;background:#111b30}.links{display:flex;gap:15px;flex-wrap:wrap}.status{min-height:1.5em}.warn{color:#ffd18c}
+</style></head><body><div class="shell"><a class="back" href="./index.html">← Torna al Kraken Opportunity Bot</a><h1>Mercato azionario <span class="pill">SOLO ANALISI · NESSUN ORDINE</span></h1>
+<p class="muted">Screener azionario multi-mercato, ricerca per simbolo e analisi assistita, separati dal bot crypto.</p>
+<p class="notice"><b>Azioni: esecuzione esclusivamente manuale.</b> Questo pannello non legge il conto titoli, non invia ordini, non usa API private e non modifica il kill switch crypto. Un ribasso non garantisce un recupero. I grafici esterni possono avere quotazioni differite.</p>
+<section class="panel"><h2>Screener azionario · classifiche di mercato</h2><p class="muted">Esplora titoli e mercati disponibili nel widget del fornitore. Applica filtri per borsa, settore, variazione, volume e capitalizzazione. Copertura e ritardo dati dipendono dal fornitore: non equivale al catalogo negoziabile su Kraken.</p>
+<label>Classifica automatica del fornitore<select id="screen"><option value="most_capitalized">Maggior capitalizzazione</option><option value="top_gainers">Maggiori rialzi</option><option value="top_losers">Maggiori ribassi</option><option value="most_active">Più scambiate</option></select></label><label>Mercato di partenza<select id="market"><option value="america">Stati Uniti</option><option value="italy">Italia</option><option value="germany">Germania</option><option value="united_kingdom">Regno Unito</option><option value="france">Francia</option><option value="japan">Giappone</option></select></label><p class="muted">Classifica aggiornata dal fornitore esterno: non è una graduatoria AI né una raccomandazione di acquisto. La disponibilità dei mercati dipende dal widget.</p><div class="tradingview-widget-container" style="min-height:570px"><div class="tradingview-widget-container__widget"></div></div>
+<p class="links"><a href="https://www.tradingview.com/screener/" target="_blank" rel="noopener noreferrer">Apri screener globale e filtri avanzati</a><a href="https://www.tradingview.com/markets/stocks-worldwide/market-movers-gainers/" target="_blank" rel="noopener noreferrer">Maggiori rialzi</a><a href="https://www.tradingview.com/markets/stocks-worldwide/market-movers-losers/" target="_blank" rel="noopener noreferrer">Maggiori ribassi</a></p></section>
+<section class="panel"><h2>Analizza un titolo a scelta</h2><p class="muted">Digita un simbolo completo (ad esempio NASDAQ:NVDA, NYSE:KO, MIL:ENI). Non sono disponibili ordini da questa pagina.</p>
+<label>Simbolo del grafico<input id="chartSymbol" value="NASDAQ:NVDA" maxlength="50" placeholder="NASDAQ:NVDA"></label><button id="loadChart" type="button">Mostra grafico</button>
+<iframe id="stockChart" loading="lazy" title="Grafico azionario selezionato" referrerpolicy="no-referrer" src="https://s.tradingview.com/widgetembed/?symbol=NASDAQ%3ANVDA&interval=D&theme=dark&style=1&locale=it&hide_top_toolbar=1"></iframe><p class="muted">Grafico fornito da TradingView, eventualmente differito.</p></section>
+<section class="panel"><h2>Flusso quotazioni · Twelve Data (facoltativo)</h2>
+<p class="muted">Legge dati giornalieri direttamente dal provider, calcola RSI 14, variazione, volume relativo e ribasso rispetto al massimo delle ultime 100 sedute circa. I prezzi non sono necessariamente in tempo reale. Non invia ordini.</p>
+<label>Chiave API personale gratuita Twelve Data<input id="tdKey" type="password" autocomplete="off" placeholder="Chiave API personale (non salvata)"></label>
+<label>Simboli BORSA:TICKER (max 8, separati da virgola)<textarea id="feedSymbols" style="min-height:80px" placeholder="NASDAQ:NVDA, NASDAQ:AMZN, NYSE:KO"></textarea></label>
+<label>Costo totale stimato di acquisto e vendita (%)<input id="feedCosts" type="number" min="0" max="20" step="0.1" value="1.6"></label>
+<button type="button" id="fetchStocks">Aggiorna dati e calcola</button><p id="feedStatus" class="muted" role="status">Nessun flusso avviato.</p>
+<p class="muted">Limite prudenziale: massimo 8 simboli per richiesta; aggiornamento solo su comando. La chiave non viene salvata o inviata a GitHub/Supabase, ma viene trasmessa al fornitore nelle richieste API. Non condividere credenziali Kraken. Il provider può applicare limiti, restrizioni per mercato o licenza.</p>
+<p class="muted">Senza spread effettivo e verifica dello strumento su Kraken, il giudizio operativo rimane ATTENDI / VERIFICA anche con punteggio elevato.</p></section>
+<section class="panel"><h2>Classifica quantitativa · dati verificati da te</h2>
+<p class="muted">Incolla dati osservati e datati da una fonte affidabile. Il punteggio 0–100 è una regola tecnica trasparente, <b>non una probabilità di rialzo né un consiglio di acquisto</b>. Non vengono recuperate automaticamente quotazioni dal widget.</p>
+<label>Fonte dei dati<input id="dataSource" placeholder="Es. provider, data e ora di rilevazione"></label>
+<label>CSV con separatore punto e virgola<textarea id="stockCsv" spellcheck="false" style="min-height:140px" placeholder="symbol;price;changePct;drawdownPct;rsi;volumeRatio;spreadPct;costPct&#10;NASDAQ:NVDA;..."></textarea></label>
+<p class="muted">Colonne: simbolo, prezzo, variazione giornaliera %, distanza dal massimo %, RSI 14, volume / volume medio, spread %, costo complessivo stimato %. Usa il punto come separatore decimale. Massimo 500 righe.</p>
+<button type="button" id="rankStocks">Calcola classifica</button><button type="button" id="copyRanking">Copia risultati per ChatGPT</button>
+<p id="rankStatus" class="muted" role="status"></p><div class="tablewrap" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th>Titolo</th><th>Punteggio</th><th>Filtro</th><th>Motivazioni</th></tr></thead><tbody id="rankBody"><tr><td colspan="4">Nessun dato importato</td></tr></tbody></table></div>
+<p class="muted">Senza dati attendibili il risultato è ATTENDI. Nessun ordine, nessun collegamento a API private Kraken.</p></section>
+<section class="panel"><h2>Richiedi valutazione AI</h2><p class="muted">Prepara un riepilogo da incollare in ChatGPT. Nessun segnale automatico viene inventato: l'analisi richiede quotazioni, costi e notizie aggiornati.</p>
+<label>Titolo da valutare (simbolo e borsa)<input id="ticker" value="NASDAQ:NVDA" maxlength="50" placeholder="Es. NASDAQ:AMZN, NYSE:KO, MIL:ENI"></label>
+<label>Orizzonte<select id="horizon"><option value="7">7 giorni</option><option value="30" selected>30 giorni</option><option value="90">90 giorni</option></select></label>
+<label>Prezzo indicativo visto sulla piattaforma (facoltativo)<input id="price" inputmode="decimal" placeholder="Es. 150,20"></label>
+<label>Note o prezzo d'acquisto già sostenuto (facoltativo)<textarea id="notes" placeholder="Es. vorrei acquistare dopo un ribasso del 5%"></textarea></label>
+<button id="copy" type="button">Copia richiesta per ChatGPT</button><p id="copyStatus" class="status muted" role="status"></p>
+</section><p class="muted">Il segnale AI (OK ACQUISTO / ATTENDI / NON ACQUISTARE) sarà un giudizio motivato dopo verifica dei dati, non una previsione certa. Eventuali operazioni su azioni o strumenti tokenizzati richiedono una verifica distinta di disponibilità, natura del prodotto e costi nell'account Kraken.</p></div>
+<script src="./stock-scoring.js"></script><script src="./stock-feed.js"></script><script>
+let rankingResult=null;
+document.getElementById('rankStocks').addEventListener('click',()=>{
+ const status=document.getElementById('rankStatus'),body=document.getElementById('rankBody');rankingResult=null;body.replaceChildren();
+ const source=document.getElementById('dataSource').value.trim();
+ if(!source){status.textContent='Indica la fonte e il momento dei dati prima di calcolare.';return;}
+ try{
+  const result=StockScreening.parseCsv(document.getElementById('stockCsv').value);
+  rankingResult={source,rows:result.rows,errors:result.errors};
+  status.textContent=result.rows.length+' titoli validi; '+result.errors.length+' righe scartate. Punteggi euristici, non previsioni.';
+  for(const x of result.rows.slice(0,100)){const tr=document.createElement('tr');for(const v of [x.symbol,String(x.score)+'/100',x.signal,x.why.join('; ')||'Nessun indicatore favorevole']){const td=document.createElement('td');td.textContent=v;td.style.padding='8px';td.style.borderBottom='1px solid #35425b';tr.appendChild(td);}body.appendChild(tr);}
+ }catch(e){status.textContent='Errore: '+e.message;}
+});
+document.getElementById('copyRanking').addEventListener('click',async()=>{
+ const status=document.getElementById('rankStatus');
+ if(!rankingResult){status.textContent='Calcola prima una classifica valida.';return;}
+ const msg='Valuta criticamente questi titoli per eventuali acquisti MANUALI. Fonte dichiarata: '+rankingResult.source+'. I punteggi sono euristici e non probabilità: '+JSON.stringify(rankingResult.rows.slice(0,30))+'. Verifica con fonti aggiornate prezzo, timestamp, notizie, rischi, costi e disponibilità effettiva su Kraken. Nessun ordine; considera ATTENDI come esito possibile.';
+ try{await navigator.clipboard.writeText(msg);status.textContent='Classifica copiata per ChatGPT.';}catch{status.textContent='Copia non disponibile nel browser.';}
+});
+document.getElementById('fetchStocks').addEventListener('click',async()=>{
+ const status=document.getElementById('feedStatus'),button=document.getElementById('fetchStocks');
+ const key=document.getElementById('tdKey').value.trim();if(!key){status.textContent='Inserisci la tua chiave Twelve Data.';return;}
+ let symbols;try{symbols=StockFeed.validSymbols(document.getElementById('feedSymbols').value);}catch(e){status.textContent=e.message;return;}
+ const cost=Number(document.getElementById('feedCosts').value);if(!Number.isFinite(cost)||cost<0||cost>20){status.textContent='Costo non valido';return;}
+ button.disabled=true;const ok=[],errors=[];status.textContent='Caricamento dati giornalieri...';
+ try{
+  for(const symbol of symbols){
+   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);
+   try{const x=await StockFeed.fetchOne(symbol,key,cost,controller.signal);ok.push(x);}
+   catch(e){errors.push(symbol+': '+e.message);}finally{clearTimeout(timeout);}
+   status.textContent='Ricevuti '+ok.length+'/'+symbols.length+'; errori '+errors.length;
+  }
+  if(ok.length){
+   const headers='symbol;price;changePct;drawdownPct;rsi;volumeRatio;spreadPct;costPct';
+   const csv=[headers,...ok.map(x=>[x.symbol,x.price,x.changePct,x.drawdownPct,x.rsi,x.volumeRatio,x.spreadPct,x.costPct].join(';'))].join('\n');
+   document.getElementById('stockCsv').value=csv;
+   document.getElementById('dataSource').value='Twelve Data · ultime sedute: '+ok.map(x=>x.symbol+' '+x.asOf).join(', ')+' · spread NON VERIFICATO';
+   document.getElementById('rankStocks').click();
+   const rows=document.querySelectorAll('#rankBody tr');for(const tr of rows){if(tr.cells&&tr.cells.length>=3)tr.cells[2].textContent='ATTENDI / VERIFICA (spread mancante)';}
+   rankingResult=null; // Prevent exporting a misleading apparently-approved list.
+  }
+  status.textContent=ok.length+' serie valide; '+errors.length+' errori. '+errors.join(' | ')+'; spread assente: nessun OK ACQUISTO.';
+ }finally{button.disabled=false;}
+});
+function renderScreener(){
+ const el=document.querySelector('.tradingview-widget-container');
+ el.replaceChildren();
+ const widget=document.createElement('div');widget.className='tradingview-widget-container__widget';el.appendChild(widget);
+ const sc=document.createElement('script');sc.src='https://s3.tradingview.com/external-embedding/embed-widget-screener.js';sc.async=true;
+ sc.textContent=JSON.stringify({width:"100%",height:540,defaultColumn:"overview",defaultScreen:document.getElementById('screen').value,market:document.getElementById('market').value,showToolbar:true,colorTheme:"dark",locale:"it"});
+ el.appendChild(sc);
+}
+document.getElementById('screen').addEventListener('change',renderScreener);
+document.getElementById('market').addEventListener('change',renderScreener);
+renderScreener();
+document.getElementById('loadChart').addEventListener('click',()=>{const v=document.getElementById('chartSymbol').value.trim().toUpperCase();if(!/^[A-Z0-9._-]{1,20}:[A-Z0-9._-]{1,25}$/.test(v)){alert('Inserisci BORSA:SIMBOLO, ad esempio NASDAQ:NVDA');return;}document.getElementById('stockChart').src='https://s.tradingview.com/widgetembed/?symbol='+encodeURIComponent(v)+'&interval=D&theme=dark&style=1&locale=it&hide_top_toolbar=1';document.getElementById('ticker').value=v;});
+document.getElementById('copy').addEventListener('click',async()=>{
+ const ticker=document.getElementById('ticker').value.trim().toUpperCase(),horizon=document.getElementById('horizon').value,price=document.getElementById('price').value.trim(),notes=document.getElementById('notes').value.trim();
+ if(!/^[A-Z0-9._-]{1,20}:[A-Z0-9._-]{1,25}$/.test(ticker)){document.getElementById('copyStatus').textContent='Inserisci un simbolo BORSA:SIMBOLO valido.';return;}const msg='Valuta '+ticker+' per un possibile acquisto MANUALE su Kraken con orizzonte '+horizon+' giorni. Verifica quotazione aggiornata e timestamp, trend, drawdown, supporti, volumi, trimestrali/notizie, spread e commissioni, disponibilità dello strumento sul mio account. Prezzo indicato (non verificato): '+(price||'non fornito')+'. Note: '+(notes||'nessuna')+'. Fornisci OK ACQUISTO / ATTENDI / NON ACQUISTARE con motivazioni, scenari rialzista/base/ribassista, rischio, livelli di ingresso/uscita condizionati ai dati e nessuna promessa di rendimento. Non eseguire ordini.';
+ const s=document.getElementById('copyStatus');try{await navigator.clipboard.writeText(msg);s.textContent='Richiesta copiata. Incollala in ChatGPT.'}catch{const t=document.createElement('textarea');t.value=msg;document.body.appendChild(t);t.select();s.textContent=document.execCommand('copy')?'Richiesta copiata.':'Copia non disponibile: seleziona il testo.';t.remove();}
+});
+</script></body></html>
