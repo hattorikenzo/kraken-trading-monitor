@@ -116,11 +116,11 @@
   return notional>=2?notional:0;
  }
  function analysisReport(){
-  const candidates=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||b.score-a.score).slice(0,5);
+  const candidates=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||b.score-a.score);
   const lines=['ANALISI INFORMATIVA KRAKEN — NESSUN ORDINE','Generata: '+new Date().toLocaleString('it-IT'),'Dati pubblici scanner browser; non sono consulenza finanziaria.','Commissioni stimate per lato: '+settings.fee+'%; slippage: '+settings.slippage+'%.','Vincoli: spot, nessuna leva, massimo 5 USDC commissioni incluse, 5 USDC riserva, una posizione.'];
-  if(!candidates.length)lines.push('Nessun dato di mercato disponibile: ATTENDERE.');
+  lines.push('Copertura scanner: '+(lastStats||'nessuna scansione completata')+'\nMercati USDC diretti con OHLC: '+candidates.length+'. La classifica visibile mostra soltanto i primi 5.');\n  if(!candidates.length)lines.push('Nessun dato di mercato disponibile: ATTENDERE.');
   candidates.forEach((x,i)=>lines.push((i+1)+'. '+x.name+' | idoneo='+Boolean(x.eligible)+' | '+String(x.strategy||'')+' | '+String(x.why||'')+' | RSI='+fmt(x.rv,1)+' | momentum24h='+fmt(x.momentum,2)+'% | costo A/R='+fmt(x.costPct,2)+'%'));
-  lines.push('Richiesta per Codex/ChatGPT: confronta i candidati, spiega rischio, spread, volatilità, costo e ragioni per ATTENDERE. Non inviare ordini e non chiedere credenziali.');
+  lines.push('Richiesta per ChatGPT: valuta tutti i mercati elencati e la copertura effettiva, senza confondere i primi 5 con l’intero mercato. Non inviare ordini e non chiedere credenziali.');
   return lines.join('\\n');
  }
  function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||Number(b.trend)-Number(a.trend)||b.score-a.score).slice(0,5);
@@ -162,12 +162,14 @@
    // Priorità a mercati USDC di asset realmente posseduti, per valutare anche vendite.
    const heldAssets=new Set(Object.entries(holdings).filter(([asset,qty])=>asset!=='USDC'&&Number(qty)>0).map(([asset])=>asset));
    const heldDirect=[...direct].filter(x=>heldAssets.has(x.path[0].market.base));
+   // Priorità assoluta alle coppie dirette USDC praticabili: fino a 50 per scansione.
+   // Se superano 50, ruotiamo il punto di partenza fra scansioni per non escluderne sempre alcune.
+   const rotation=Math.floor(Date.now()/SCAN_MS)%Math.max(1,direct.length);
+   const directOrdered=[...direct].sort((a,b)=>a.path[0].market.id.localeCompare(b.path[0].market.id));
+   const rotated=directOrdered.slice(rotation).concat(directOrdered.slice(0,rotation));
    addCandidates(heldDirect,Math.min(12,MAX_OHLC));
-   addCandidates(byMomentum,Math.max(selected.length,18));
-   addCandidates(byDip,30);
-   addCandidates(byLiquidity,42);
-   addCandidates(byCost,MAX_OHLC);
-   // Le rotazioni sono monitorate soltanto come contesto, non abilitate al trading.
+   addCandidates(rotated,MAX_OHLC);
+   // Percorsi indiretti soltanto se rimane capacità, senza togliere spazio ai mercati USDC.
    addCandidates([...other].sort((a,b)=>a.metrics.costPct-b.metrics.costPct),MAX_OHLC);
   $('coverage').textContent=`${market.length} ticker validi · ${paths.length} percorsi ≤2 scambi · ${selected.length} OHLC`;
   const found=[];let ok=0,errors=0;for(let i=0;i<selected.length;i+=CONCURRENCY){await Promise.all(selected.slice(i,i+CONCURRENCY).map(async x=>{try{const raw=await api('OHLC',{pair:x.path.at(-1).market.id,interval:60});const item=analyze(raw,x.path,amount);if(item){found.push(item);ok++}else errors++}catch(e){errors++;console.warn('OHLC',x.path.at(-1).market.name,e.message)}}));}
@@ -212,7 +214,7 @@
     (bestRejected?' Miglior candidato escluso: '+bestRejected.name+' ('+bestRejected.why+', momentum '+fmt(bestRejected.momentum,2)+'%, costo stimato A/R '+fmt(bestRejected.costPct,2)+'%).':'')+
     (operational.length?' Controlli operativi da completare: '+operational.join(', ')+'.':'');
    diagnostics={summary,rejected,operational};
-   lastStats=`DIAGNOSTICA v3.8.0 — ${summary}\n\nCopertura: ${all.length} coppie spot, ${market.length} ticker validi, ${paths.length} percorsi da USDC; ${eligiblePaths.length} percorsi praticabili al controllo preliminare.\nAnalisi 1h: ${found.length} risultati validi su ${selected.length} richieste (mancanti/non validi: ${missedOHLC}; errori API: ${errors}). Conferme 15m: ${fastPool.filter(x=>x.fastChecked).length}/${fastPool.length}; errori: ${fastErrors}.\nMercati diretti USDC analizzati: ${directFound.length}; percorsi indiretti solo informativi: ${found.length-directFound.length}.\nLimite: ${MAX_OHLC} OHLC 1h e ${MAX_FAST} OHLC 15m per scansione ogni 5 minuti; non rappresenta l'intero mercato.\nImpostazioni: commissione stimata ${fmt(settings.fee,2)}% per lato, slippage ${fmt(settings.slippage,2)}% per lato; non sono necessariamente le commissioni reali del tuo account.\nPosizioni con segnale di vendita: ${heldSignals.length}.\nUn segnale non dimostra un profitto futuro. Nessun ordine automatico.`;
+   lastStats=`DIAGNOSTICA v3.8.0 — ${summary}\n\nCopertura: ${all.length} coppie spot, ${market.length} ticker validi, ${paths.length} percorsi da USDC; ${eligiblePaths.length} percorsi praticabili al controllo preliminare.\nAnalisi 1h: ${found.length} risultati validi su ${selected.length} richieste (mancanti/non validi: ${missedOHLC}; errori API: ${errors}). Conferme 15m: ${fastPool.filter(x=>x.fastChecked).length}/${fastPool.length}; errori: ${fastErrors}.\nMercati diretti USDC praticabili al filtro preliminare: ${direct.length}; analizzati con OHLC: ${directFound.length}; percorsi indiretti solo informativi: ${found.length-directFound.length}.\nLimite: ${MAX_OHLC} OHLC 1h e ${MAX_FAST} OHLC 15m per scansione ogni 5 minuti; eventuali coppie dirette oltre 50 ruotano tra scansioni. Nessun segnale sui mercati senza OHLC.\nImpostazioni: commissione stimata ${fmt(settings.fee,2)}% per lato, slippage ${fmt(settings.slippage,2)}% per lato; non sono necessariamente le commissioni reali del tuo account.\nPosizioni con segnale di vendita: ${heldSignals.length}.\nUn segnale non dimostra un profitto futuro. Nessun ordine automatico.`;
   $('scanDetails').textContent=lastStats;$('scanTime').textContent='Ultima analisi: '+new Date().toLocaleTimeString('it-IT');setStatus('Analisi completata');render();
  }catch(e){setStatus('Errore analisi');$('scanDetails').textContent='Errore API pubblica Kraken: '+e.message;console.error(e)}finally{scanning=false;$('scanNow').disabled=false}}
  const analysisButton=$('exportAnalysis');
