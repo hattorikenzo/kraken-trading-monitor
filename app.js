@@ -120,7 +120,15 @@
   const lines=['ANALISI INFORMATIVA KRAKEN — NESSUN ORDINE','Generata: '+new Date().toLocaleString('it-IT'),'Dati pubblici scanner browser; non sono consulenza finanziaria.','Commissioni stimate per lato: '+settings.fee+'%; slippage: '+settings.slippage+'%.','Vincoli: spot, nessuna leva, massimo 5 USDC commissioni incluse, 5 USDC riserva, una posizione.'];
   lines.push('Copertura scanner: '+(lastStats||'nessuna scansione completata')+'\\nMercati USDC diretti con OHLC: '+candidates.length+'. La classifica visibile mostra soltanto i primi 5.');
   if(!candidates.length)lines.push('Nessun dato di mercato disponibile: ATTENDERE.');
-  candidates.forEach((x,i)=>lines.push((i+1)+'. '+x.name+' | idoneo='+Boolean(x.eligible)+' | '+String(x.strategy||'')+' | '+String(x.why||'')+' | RSI='+fmt(x.rv,1)+' | momentum24h='+fmt(x.momentum,2)+'% | costo A/R='+fmt(x.costPct,2)+'%'));
+  lines.push('Legenda: SEGNALE TECNICO = contesto 1h; ECONOMIA = rapporto netto target/stop dopo costi; CONFERMA 15m = verifica separata. I risultati sono scenari, non previsioni.');
+  const economicOk=x=>x.gain>0&&x.loss<0&&x.ratio>=1.25;
+  const techAndEconomics=candidates.filter(x=>x.trend&&!economicOk(x));
+  lines.push('RIEPILOGO: contesto tecnico 1h presente '+candidates.filter(x=>x.trend).length+'/'+candidates.length+'; segnale tecnico presente ma economia insufficiente '+techAndEconomics.length+'; conferme 15m eseguite '+candidates.filter(x=>x.fastChecked).length+'; idonei '+candidates.filter(x=>x.eligible).length+'.');
+  candidates.forEach((x,i)=>{
+    const economic=economicOk(x);
+    const stage=!x.trend?'NESSUN SEGNALE TECNICO 1h':!economic?'SEGNALE TECNICO PRESENTE → CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE':!x.structural?'FILTRO OPERATIVO NON SUPERATO → NESSUN ORDINE':!x.fastChecked?'ATTESA CONFERMA 15m → NESSUN ORDINE':!x.fastOk?'CONFERMA 15m NEGATIVA → NESSUN ORDINE':x.eligible?'CANDIDATO IDONEO — NON È UN ORDINE':'NON IDONEO → NESSUN ORDINE';
+    lines.push((i+1)+'. '+x.name+' | idoneo='+Boolean(x.eligible)+' | '+stage+' | strategia='+String(x.strategy||'')+' | motivo='+String(x.why||'')+' | RSI='+fmt(x.rv,1)+' | momentum24h='+fmt(x.momentum,2)+'% | ATR='+fmt(x.atr,2)+'% | target='+fmt(x.targetPct,2)+'% | stop='+fmt(x.stopPct,2)+'% | guadagno netto teorico='+fmt(x.gain,4)+' USDC | perdita netta teorica='+fmt(x.loss,4)+' USDC | rapporto netto='+fmt(x.ratio,3)+' (min 1,25) | spread='+fmt(x.spreadMax,3)+'% | costo A/R='+fmt(x.costPct,2)+'% | conferma15m='+String(x.fastChecked?(x.fastOk?'OK':'NO'):'NON ESEGUITA'));
+  });
   lines.push('Richiesta per ChatGPT: valuta tutti i mercati elencati e la copertura effettiva, senza confondere i primi 5 con l’intero mercato. Non inviare ordini e non chiedere credenziali.');
   return lines.join('\\n');
  }
