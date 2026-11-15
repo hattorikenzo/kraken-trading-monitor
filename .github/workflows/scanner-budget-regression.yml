@@ -54,6 +54,12 @@ jobs:
           assert(src.includes('SOLO INFORMATIVO'),'informational label missing');
           assert(src.includes('SEGNALE 1h E 15m CONFERMATI'));
           assert(src.includes('15m NON CONFERMATO'));
+          assert(src.includes('function marketOverview(pairs,tickers)'));
+          assert(src.includes("marketOverview(all,tickers)"));
+          assert(src.includes("vol*Number(t.p?.[1]||last)"));
+          assert(src.includes("quote==='USDC'?'USDC spot':'Altra valuta (informativo)'"));
+          assert(src.includes("const liquid=rows.filter(x=>x.turnover>=10000&&x.trades>=30&&x.spread<=0.6)"));
+          console.log('PASS_MARKET_RADAR_PUBLIC_DATA_NO_TRADE');
           console.log('PASS_STAGING_390_INFORMATIONAL_15M_SAFETY');
           console.log('PASS_FULL_MARKET_DIAGNOSTIC_EXPORT');
           console.log('PASS_SCANNER_SYNTAX');
