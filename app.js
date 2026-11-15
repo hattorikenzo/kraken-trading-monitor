@@ -118,7 +118,8 @@
  function analysisReport(){
   const candidates=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||b.score-a.score);
   const lines=['ANALISI INFORMATIVA KRAKEN — NESSUN ORDINE','Generata: '+new Date().toLocaleString('it-IT'),'Dati pubblici scanner browser; non sono consulenza finanziaria.','Commissioni stimate per lato: '+settings.fee+'%; slippage: '+settings.slippage+'%.','Vincoli: spot, nessuna leva, massimo 5 USDC commissioni incluse, 5 USDC riserva, una posizione.'];
-  lines.push('Copertura scanner: '+(lastStats||'nessuna scansione completata')+'\\nMercati USDC diretti con OHLC: '+candidates.length+'. La classifica visibile mostra soltanto i primi 5.');\n  if(!candidates.length)lines.push('Nessun dato di mercato disponibile: ATTENDERE.');
+  lines.push('Copertura scanner: '+(lastStats||'nessuna scansione completata')+'\\nMercati USDC diretti con OHLC: '+candidates.length+'. La classifica visibile mostra soltanto i primi 5.');
+  if(!candidates.length)lines.push('Nessun dato di mercato disponibile: ATTENDERE.');
   candidates.forEach((x,i)=>lines.push((i+1)+'. '+x.name+' | idoneo='+Boolean(x.eligible)+' | '+String(x.strategy||'')+' | '+String(x.why||'')+' | RSI='+fmt(x.rv,1)+' | momentum24h='+fmt(x.momentum,2)+'% | costo A/R='+fmt(x.costPct,2)+'%'));
   lines.push('Richiesta per ChatGPT: valuta tutti i mercati elencati e la copertura effettiva, senza confondere i primi 5 con l’intero mercato. Non inviare ordini e non chiedere credenziali.');
   return lines.join('\\n');
