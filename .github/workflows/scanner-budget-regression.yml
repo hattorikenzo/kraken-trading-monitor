@@ -47,6 +47,14 @@ jobs:
           assert(src.includes('SEGNALE TECNICO PRESENTE → CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE'));
           assert(src.includes('x.trend&&!economicOk(x)'));
           assert(src.includes('x.gain>0&&x.loss<0&&x.ratio>=1.25'));
+          assert(src.includes('DIAGNOSTICA v3.9.0 STAGING'));
+          assert(!src.includes('DIAGNOSTICA v3.8.0'));
+          assert(src.includes('(x.structural||x.trend)'),'15m must include hourly signals');
+          assert(src.includes('x.eligible=x.structural&&x.fastOk&&x.trend'),'informational checks cannot enable orders');
+          assert(src.includes('SOLO INFORMATIVO'),'informational label missing');
+          assert(src.includes('SEGNALE 1h E 15m CONFERMATI'));
+          assert(src.includes('15m NON CONFERMATO'));
+          console.log('PASS_STAGING_390_INFORMATIONAL_15M_SAFETY');
           console.log('PASS_FULL_MARKET_DIAGNOSTIC_EXPORT');
           console.log('PASS_SCANNER_SYNTAX');
           console.log('PASS_FEE_INCLUSIVE_CAP_AND_RESERVE');
