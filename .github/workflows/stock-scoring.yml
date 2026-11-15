@@ -1,0 +1,24 @@
+name: Stock screener checks
+on:
+  push:
+    branches: [feature/stock-market-monitor-manual]
+  pull_request:
+    paths:
+      - 'stocks.html'
+      - 'stock-scoring.js'
+      - 'tests/stock-scoring.test.cjs'
+      - '.github/workflows/stock-scoring.yml'
+permissions:
+  contents: read
+jobs:
+  stock-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check stock-scoring.js
+      - run: node --check tests/stock-scoring.test.cjs
+      - run: node tests/stock-scoring.test.cjs
