@@ -73,7 +73,7 @@ main>.panel{margin:12px 0!important}
 <div class="preview" style="margin-top:14px">
 <small>Indicazione del bot crypto</small><div id="simpleSignal" class="simple-state">ATTENDI</div><p id="simpleReason">Premi Analizza per verificare il mercato.</p>
 <p id="simpleUpdated" class="simple-note">Nessuna scansione verificata</p></div>
-<div class="simple-actions" style="margin-top:14px"><button id="simpleAnalyze" type="button">Analizza mercati</button><button id="simpleBuy" type="button" disabled>Compra · non disponibile</button><button id="simpleSell" type="button" disabled>Vendi · non disponibile</button></div>
+<div class="simple-actions" style="margin-top:14px"><button id="simpleAnalyze" type="button">Analizza mercati</button><button id="simpleBuy" type="button">Compra · valuta proposta</button><button id="simpleSell" type="button">Vendi · verifica possesso</button></div>
 <p id="simpleActionInfo" class="simple-note" role="status">I comandi di acquisto e vendita si attivano solo dopo i controlli di sicurezza e la certificazione del percorso reale.</p>
 <h3>Mercati da osservare</h3><div class="simple-grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
 <div class="simple-market"><b>Criptovalute · Kraken</b><p id="simpleCryptoMarket" class="simple-note">In attesa di analisi.</p></div>
@@ -117,9 +117,27 @@ main>.panel{margin:12px 0!important}
   $('simpleUpdated').textContent=scanTime?.textContent||'Nessuna scansione verificata';
   const trs=Array.from(opps?.querySelectorAll('tr')||[]).filter(tr=>tr.cells.length>=5).slice(0,3);
   $('simpleCryptoMarket').textContent=trs.length?trs.map(tr=>tr.cells[0].textContent.trim()+': '+tr.cells[4].textContent.trim()).join(' · '):'Nessun mercato idoneo verificato.';
-  // Fail closed: no automatic real trade buttons in this simplified interface.
-  $('simpleBuy').disabled=true;$('simpleSell').disabled=true;
+  // The buttons are usable, but do not bypass server-side LIVE restrictions.
+  $('simpleBuy').disabled=false;$('simpleSell').disabled=false;
  }
+ function revealAdvanced(){
+  const details=advanced.closest('details');if(details)details.open=true;
+  advanced.scrollIntoView({behavior:'smooth',block:'start'});
+ }
+ $('simpleBuy').addEventListener('click',()=>{
+  const prepare=$('prepareOrder'),status=($('decisionStatus')?.textContent||'').trim();
+  if(!prepare||prepare.disabled||/ATTENDI|BLOCC|HALT|ERRORE|INIZIAL/i.test(status)){
+   $('simpleActionInfo').textContent='Nessun acquisto autorizzato. Premi Analizza: il bot deve trovare un mercato idoneo. Non è stato inviato alcun ordine.';
+   return;
+  }
+  revealAdvanced();prepare.click();
+  $('simpleActionInfo').textContent='Proposta preparata nella sezione dettagli. Controlla importo, mercato e condizioni: nessun ordine è stato inviato.';
+ });
+ $('simpleSell').addEventListener('click',()=>{
+  const check=$('checkOrders');if(check&&!check.disabled)check.click();
+  revealAdvanced();
+  $('simpleActionInfo').textContent='Controlla posizioni e ordini nella sezione dettagli. La vendita richiede un asset posseduto e la conferma esplicita; nessun ordine è stato inviato.';
+ });
  $('simpleAnalyze').addEventListener('click',()=>{const b=$('scanNow');if(b&&!b.disabled){b.click();$('simpleActionInfo').textContent='Scansione richiesta: attendi i dati aggiornati.';}else $('simpleActionInfo').textContent='Analisi non disponibile: verifica connessione e accesso.';});
  const observer=new MutationObserver(render);
  for(const node of [balance,signal,reason,opps,scanTime])if(node)observer.observe(node,{childList:true,subtree:true,characterData:true});
