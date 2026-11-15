@@ -41,6 +41,13 @@ jobs:
           assert(!meetsMin(100,0.06,2.5));
           assert(!meetsMin(100,0.01,5.1));
           assert(!src.includes('AddOrder('),'scanner must not directly submit Kraken orders');
+          for(const field of ['ATR=','target=','stop=','guadagno netto teorico=','perdita netta teorica=','rapporto netto=','spread=','conferma15m=']){
+            assert(src.includes(field),'missing scanner diagnostic: '+field);
+          }
+          assert(src.includes('SEGNALE TECNICO PRESENTE → CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE'));
+          assert(src.includes('x.trend&&!economicOk(x)'));
+          assert(src.includes('x.gain>0&&x.loss<0&&x.ratio>=1.25'));
+          console.log('PASS_FULL_MARKET_DIAGNOSTIC_EXPORT');
           console.log('PASS_SCANNER_SYNTAX');
           console.log('PASS_FEE_INCLUSIVE_CAP_AND_RESERVE');
           console.log('PASS_5_USDC_GATE_REMOVED');
