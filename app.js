@@ -158,7 +158,13 @@ function marketOverview(pairs,tickers){
   return lines.join('\\n');
  }
  function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||Number(b.trend)-Number(a.trend)||b.score-a.score).slice(0,5);
-  $('opportunities').innerHTML=top.map(x=>`<tr><td>${esc(x.name)}<small style="display:block">${x.route.length} scambio/i</small></td><td>${x.direction} <small style="display:block">${esc(x.strategy||'')}</small></td><td class="${x.eligible?'up':''}">${esc(x.why)}</td><td class="${x.gain>=0?'up':'down'}">${x.route.length>1?'n.d.':fmt(x.gain,3)+' USDC'}</td><td>${fmt(x.costPct,2)}%</td></tr>`).join('')||'<tr><td colspan="5">Nessun percorso analizzato.</td></tr>';
+  $('opportunities').innerHTML=top.map(x=>{
+   const verdict=x.eligible?'DA VALUTARE':!x.trend?'SCARTATO':x.fastChecked&&!x.fastOk?'ATTENDERE':'SCARTATO';
+   const why=x.eligible?'Filtri tecnici ed economici superati':!x.trend?'Segnale orario assente':x.fastChecked&&!x.fastOk?'15m non confermato; '+x.why:x.why;
+   const fast=x.fastError?'Errore dati 15m':x.fastChecked?(x.fastOk?'15m confermato':'15m non confermato'):'15m non verificato';
+   const pnl=Number.isFinite(x.gain)&&Number.isFinite(x.loss)?'<span class="'+(x.gain>=0?'up':'down')+'">+'+fmt(x.gain,4)+' USDC</span><small style="display:block" class="down">'+fmt(x.loss,4)+' USDC</small>':'—';
+   return `<tr><td><b>${esc(x.name)}</b><small style="display:block">Spot USDC</small></td><td>${esc(x.strategy||x.direction||'Nessun segnale')}<small style="display:block">${esc(fast)}</small></td><td><span class="up">+${fmt(x.targetPct,2)}%</span><small style="display:block" class="down">Stop −${fmt(x.stopPct,2)}%</small></td><td>${pnl}<small style="display:block">Costi A/R ${fmt(x.costPct,2)}%</small></td><td><b class="${x.eligible?'up':'down'}">${verdict}</b><small style="display:block">${esc(why)}</small><small style="display:block">R/R ${fmt(x.ratio,3)} / 1,25</small></td></tr>`;
+  }).join('')||'<tr><td colspan="5">Nessun percorso analizzato.</td></tr>';
    const sell=heldSignals.find(x=>{const m=x.route[0].market;const held=Number(holdings[m.base]||0);return held*m.bid>=Math.max(2,m.costmin,m.ordermin*m.bid)});
    const safePortfolio=portfolioAt>0&&Date.now()-portfolioAt<300000&&openCount===0;
    if(sell&&safePortfolio&&fresh){const m=sell.route[0].market;const held=Number(holdings[m.base]);const budget=Math.min(MAX_TRADE,settings.maxTrade,held*m.bid*0.98);
