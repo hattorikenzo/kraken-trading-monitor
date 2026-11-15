@@ -12,6 +12,14 @@
 <section class="panel"><h2>Analizza un titolo a scelta</h2><p class="muted">Digita un simbolo completo (ad esempio NASDAQ:NVDA, NYSE:KO, MIL:ENI). Non sono disponibili ordini da questa pagina.</p>
 <label>Simbolo del grafico<input id="chartSymbol" value="NASDAQ:NVDA" maxlength="50" placeholder="NASDAQ:NVDA"></label><button id="loadChart" type="button">Mostra grafico</button>
 <iframe id="stockChart" loading="lazy" title="Grafico azionario selezionato" referrerpolicy="no-referrer" src="https://s.tradingview.com/widgetembed/?symbol=NASDAQ%3ANVDA&interval=D&theme=dark&style=1&locale=it&hide_top_toolbar=1"></iframe><p class="muted">Grafico fornito da TradingView, eventualmente differito.</p></section>
+<section class="panel"><h2>Flusso quotazioni · Twelve Data (facoltativo)</h2>
+<p class="muted">Legge dati giornalieri direttamente dal provider, calcola RSI 14, variazione, volume relativo e ribasso rispetto al massimo delle ultime 100 sedute circa. I prezzi non sono necessariamente in tempo reale. Non invia ordini.</p>
+<label>Chiave API personale gratuita Twelve Data<input id="tdKey" type="password" autocomplete="off" placeholder="Chiave API personale (non salvata)"></label>
+<label>Simboli BORSA:TICKER (max 8, separati da virgola)<textarea id="feedSymbols" style="min-height:80px" placeholder="NASDAQ:NVDA, NASDAQ:AMZN, NYSE:KO"></textarea></label>
+<label>Costo totale stimato di acquisto e vendita (%)<input id="feedCosts" type="number" min="0" max="20" step="0.1" value="1.6"></label>
+<button type="button" id="fetchStocks">Aggiorna dati e calcola</button><p id="feedStatus" class="muted" role="status">Nessun flusso avviato.</p>
+<p class="muted">Limite prudenziale: massimo 8 simboli per richiesta; aggiornamento solo su comando. La chiave non viene salvata o inviata a GitHub/Supabase, ma viene trasmessa al fornitore nelle richieste API. Non condividere credenziali Kraken. Il provider può applicare limiti, restrizioni per mercato o licenza.</p>
+<p class="muted">Senza spread effettivo e verifica dello strumento su Kraken, il giudizio operativo rimane ATTENDI / VERIFICA anche con punteggio elevato.</p></section>
 <section class="panel"><h2>Classifica quantitativa · dati verificati da te</h2>
 <p class="muted">Incolla dati osservati e datati da una fonte affidabile. Il punteggio 0–100 è una regola tecnica trasparente, <b>non una probabilità di rialzo né un consiglio di acquisto</b>. Non vengono recuperate automaticamente quotazioni dal widget.</p>
 <label>Fonte dei dati<input id="dataSource" placeholder="Es. provider, data e ora di rilevazione"></label>
@@ -27,7 +35,7 @@
 <label>Note o prezzo d'acquisto già sostenuto (facoltativo)<textarea id="notes" placeholder="Es. vorrei acquistare dopo un ribasso del 5%"></textarea></label>
 <button id="copy" type="button">Copia richiesta per ChatGPT</button><p id="copyStatus" class="status muted" role="status"></p>
 </section><p class="muted">Il segnale AI (OK ACQUISTO / ATTENDI / NON ACQUISTARE) sarà un giudizio motivato dopo verifica dei dati, non una previsione certa. Eventuali operazioni su azioni o strumenti tokenizzati richiedono una verifica distinta di disponibilità, natura del prodotto e costi nell'account Kraken.</p></div>
-<script src="./stock-scoring.js"></script><script>
+<script src="./stock-scoring.js"></script><script src="./stock-feed.js"></script><script>
 let rankingResult=null;
 document.getElementById('rankStocks').addEventListener('click',()=>{
  const status=document.getElementById('rankStatus'),body=document.getElementById('rankBody');rankingResult=null;body.replaceChildren();
@@ -45,6 +53,31 @@ document.getElementById('copyRanking').addEventListener('click',async()=>{
  if(!rankingResult){status.textContent='Calcola prima una classifica valida.';return;}
  const msg='Valuta criticamente questi titoli per eventuali acquisti MANUALI. Fonte dichiarata: '+rankingResult.source+'. I punteggi sono euristici e non probabilità: '+JSON.stringify(rankingResult.rows.slice(0,30))+'. Verifica con fonti aggiornate prezzo, timestamp, notizie, rischi, costi e disponibilità effettiva su Kraken. Nessun ordine; considera ATTENDI come esito possibile.';
  try{await navigator.clipboard.writeText(msg);status.textContent='Classifica copiata per ChatGPT.';}catch{status.textContent='Copia non disponibile nel browser.';}
+});
+document.getElementById('fetchStocks').addEventListener('click',async()=>{
+ const status=document.getElementById('feedStatus'),button=document.getElementById('fetchStocks');
+ const key=document.getElementById('tdKey').value.trim();if(!key){status.textContent='Inserisci la tua chiave Twelve Data.';return;}
+ let symbols;try{symbols=StockFeed.validSymbols(document.getElementById('feedSymbols').value);}catch(e){status.textContent=e.message;return;}
+ const cost=Number(document.getElementById('feedCosts').value);if(!Number.isFinite(cost)||cost<0||cost>20){status.textContent='Costo non valido';return;}
+ button.disabled=true;const ok=[],errors=[];status.textContent='Caricamento dati giornalieri...';
+ try{
+  for(const symbol of symbols){
+   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);
+   try{const x=await StockFeed.fetchOne(symbol,key,cost,controller.signal);ok.push(x);}
+   catch(e){errors.push(symbol+': '+e.message);}finally{clearTimeout(timeout);}
+   status.textContent='Ricevuti '+ok.length+'/'+symbols.length+'; errori '+errors.length;
+  }
+  if(ok.length){
+   const headers='symbol;price;changePct;drawdownPct;rsi;volumeRatio;spreadPct;costPct';
+   const csv=[headers,...ok.map(x=>[x.symbol,x.price,x.changePct,x.drawdownPct,x.rsi,x.volumeRatio,x.spreadPct,x.costPct].join(';'))].join('\n');
+   document.getElementById('stockCsv').value=csv;
+   document.getElementById('dataSource').value='Twelve Data · ultime sedute: '+ok.map(x=>x.symbol+' '+x.asOf).join(', ')+' · spread NON VERIFICATO';
+   document.getElementById('rankStocks').click();
+   const rows=document.querySelectorAll('#rankBody tr');for(const tr of rows){if(tr.cells&&tr.cells.length>=3)tr.cells[2].textContent='ATTENDI / VERIFICA (spread mancante)';}
+   rankingResult=null; // Prevent exporting a misleading apparently-approved list.
+  }
+  status.textContent=ok.length+' serie valide; '+errors.length+' errori. '+errors.join(' | ')+'; spread assente: nessun OK ACQUISTO.';
+ }finally{button.disabled=false;}
 });
 function renderScreener(){
  const el=document.querySelector('.tradingview-widget-container');
