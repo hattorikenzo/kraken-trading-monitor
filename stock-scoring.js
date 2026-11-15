@@ -35,5 +35,5 @@
   lines.slice(1).forEach((line,i)=>{try{const v=line.split(';');if(v.length!==keys.length)throw Error('numero colonne');const item={};keys.forEach((k,j)=>item[k]=v[j].trim());rows.push(scoreStock(item));}catch(e){errors.push('Riga '+(i+2)+': '+e.message);}});
   return {rows:rows.sort((a,b)=>b.score-a.score||a.symbol.localeCompare(b.symbol)),errors};
  }
- root.StockScreening={scoreStock,parseCsv};
+ if(typeof module!=='undefined'&&module.exports){module.exports={scoreStock,parseCsv};}else{root.StockScreening={scoreStock,parseCsv};}
 })(typeof module!=='undefined'&&module.exports?module.exports:window);
