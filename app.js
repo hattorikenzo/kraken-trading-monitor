@@ -1,5 +1,5 @@
 'use strict';
-// Kraken Opportunity Bot v3.8.0: segnali multi-timeframe, simulazione bid/ask corretta, spot con conferma.
+// Kraken Opportunity Bot v3.9.1 STAGING: segnali multi-timeframe, simulazione bid/ask corretta, spot con conferma.
 (()=>{
  const $=id=>document.getElementById(id);
  const fmt=(n,d=3)=>Number.isFinite(n)?n.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
@@ -27,6 +27,31 @@
  function rsi(c){if(c.length<16)return 50;let up=0,down=0;for(let i=c.length-14;i<c.length;i++){const d=c[i]-c[i-1];up+=Math.max(d,0);down+=Math.max(-d,0)}return down===0?(up?100:50):100-100/(1+up/down)}
  function markets(raw){return Object.entries(raw).filter(([id,p])=>p&&p.status==='online'&&p.wsname?.includes('/')&&!p.wsname.includes('.d')&&p.base&&p.quote&&isCrypto(p.base)).map(([id,p])=>({id,name:p.wsname,base:p.base,quote:p.quote,ordermin:Number(p.ordermin)||0,costmin:Number(p.costmin)||0}));}
  function tickerFor(tickers,p){return tickers[p.id]||tickers[p.name.replace('/','')]||null}
+
+// Panoramica pubblica Kraken: statistiche di sessione UTC e volumi mobili 24h.
+// Non genera ordini e non modifica la graduatoria dei segnali operativi.
+function marketOverview(pairs,tickers){
+ const rows=[];
+ for(const p of pairs){
+  const t=tickerFor(tickers,p);if(!t)continue;
+  const bid=Number(t.b?.[0]),ask=Number(t.a?.[0]),last=Number(t.c?.[0]),open=Number(t.o),vol=Number(t.v?.[1]),trades=Number(t.t?.[1]);
+  if(!(bid>0&&ask>=bid&&last>0&&open>0&&vol>0))continue;
+  const spread=100*(ask-bid)/((ask+bid)/2),change=100*(last/open-1);
+  const quote=p.quote,fiat=['ZUSD','ZEUR','USD','EUR','USDC','USDT'].includes(quote);
+  if(!fiat||spread>1.5)continue;
+  rows.push({name:p.name,quote,change,spread,turnover:vol*Number(t.p?.[1]||last),trades,action:quote==='USDC'?'USDC spot':'Altra valuta (informativo)'});
+ }
+ const liquid=rows.filter(x=>x.turnover>=10000&&x.trades>=30&&x.spread<=0.6);
+ const top=(arr,fn)=>[...arr].sort(fn).slice(0,5);
+ const sections=[
+  ['In rialzo · da apertura UTC',top(liquid,(a,b)=>b.change-a.change)],
+  ['In ribasso · da apertura UTC',top(liquid,(a,b)=>a.change-b.change)],
+  ['Più scambiate · controvalore 24h',top(liquid,(a,b)=>b.turnover-a.turnover)]
+ ];
+ const target=$('marketOverview');if(!target)return;
+ target.innerHTML=sections.map(([title,items])=>'<div><h3>'+esc(title)+'</h3><ol>'+items.map(x=>'<li><b>'+esc(x.name)+'</b> · '+fmt(x.change,2)+'% · '+fmt(x.turnover,0)+' '+esc(x.quote)+' scambiati (controvalore stimato) · spread '+fmt(x.spread,2)+'% · '+esc(x.action)+'</li>').join('')+'</ol></div>').join('');
+ $('overviewCount').textContent=liquid.length+' mercati con liquidità minima, '+rows.length+' quotazioni valutate; variazioni da apertura UTC, volumi mobili 24h. Nessun segnale di acquisto automatico.';
+}
  function graphFrom(list,tickers){const graph=new Map(),market=[];const add=(a,e)=>{if(!graph.has(a))graph.set(a,[]);graph.get(a).push(e)};
   for(const p of list){const t=tickerFor(tickers,p);if(!t)continue;const bid=Number(t.b?.[0]),ask=Number(t.a?.[0]),last=Number(t.c?.[0]),volume=Number(t.v?.[1]);if(!(bid>0&&ask>=bid&&last>0&&volume>0))continue;const spread=100*(ask-bid)/((ask+bid)/2);if(spread>1.5)continue;const opening=Number(t.o),change24=opening>0?100*(last/opening-1):NaN;const m={...p,bid,ask,last,volume,spread,change24};market.push(m);
    add(p.quote,{from:p.quote,to:p.base,market:m,side:'buy',rate:1/ask});add(p.base,{from:p.base,to:p.quote,market:m,side:'sell',rate:bid});
@@ -153,7 +178,7 @@
  async function scan(){if(scanning)return;scanning=true;results=[];diagnostics=null;selectedLive=null;window.krakenSelectedOrder=null;$('prepareOrder').disabled=true;$('scanNow').disabled=true;setStatus('Analisi di tutte le coppie spot…');try{
   const all=markets(await api('AssetPairs'));$('marketCount').textContent=String(all.length);
   // Ticker senza parametro pair: snapshot di tutti i mercati. Nessuna richiesta OHLC per migliaia di coppie.
-  const tickers=await api('Ticker');const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance!==null?balance-MIN_LIQUID_RESERVE:MAX_TRADE)/(1+(Math.max(0,settings.fee)+Math.max(0,settings.slippage))/100));
+  const tickers=await api('Ticker');marketOverview(all,tickers);const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance!==null?balance-MIN_LIQUID_RESERVE:MAX_TRADE)/(1+(Math.max(0,settings.fee)+Math.max(0,settings.slippage))/100));
   // Valutiamo TUTTI i percorsi a prezzi bid/ask, poi usiamo OHLC solo sui candidati più praticabili.
   const eligiblePaths=paths.map(path=>({path,metrics:routeMetrics(path,amount)})).filter(x=>x.metrics.ok&&x.metrics.costPct<5&&x.path.every(e=>e.market.spread<=1));
    // Diversificazione: non scegliere i 50 OHLC soltanto in base allo spread.
