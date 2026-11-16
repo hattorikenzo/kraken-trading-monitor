@@ -9,7 +9,7 @@
  const fiat=new Set(['USD','EUR','GBP','USDC','USDT','CAD','CHF','AUD','JPY']);
  const fmt=(n,d=2)=>Number.isFinite(n)?n.toLocaleString('it-IT',{maximumFractionDigits:d,minimumFractionDigits:d}):'—';
  const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- let balances=null,balancesAt=0,portfolio={},scanning=false,lastScan=null,rows=[];
+ let balances=null,balancesAt=0,portfolio={},scanning=false,lastScan=null,rows=[],watchlist=[],watchBusy=false,watchAt=0;
  const set=(id,s)=>{if($(id))$(id).textContent=s};
  const now=()=>Date.now();
  async function api(path,params={}){
@@ -88,7 +88,7 @@
     const batch=await Promise.allSettled(selected.slice(i,i+3).map(momentum));
     for(const r of batch)if(r.status==='fulfilled'&&r.value)out.push(r.value);
    }
-   rows=out.sort((a,b)=>b.score-a.score||b.volumeRatio-a.volumeRatio);
+   rows=out.sort((a,b)=>b.score-a.score||b.volumeRatio-a.volumeRatio);watchlist=rows.slice(0,5).map(x=>({id:x.id,name:x.name,base:x.base,quote:x.quote}));
    lastScan=now();
    const best=rows.find(x=>x.eligible);
    const display=rows.slice(0,10);
@@ -105,6 +105,38 @@
   }catch(e){set('decisionStatus','ERRORE');set('decision','Scansione non verificata: '+e.message);set('scanTime','Errore');}
   finally{scanning=false;$('scanNow').disabled=false}
  }
+ // Watchlist: lightweight public Ticker + Depth checks every 30s. Not an execution signal.
+ async function watch(){
+  if(watchBusy||scanning||!watchlist.length||document.hidden)return;
+  watchBusy=true;
+  try{
+   const tick=await api('Ticker',{pair:watchlist.map(x=>x.id).join(',')});
+   const updates=[];
+   for(const m of watchlist){
+    const t=tick[m.id]||tick[m.name.replace('/','')];if(!t)continue;
+    const bid=Number(t.b?.[0]),ask=Number(t.a?.[0]);
+    if(!(bid>0&&ask>=bid))continue;
+    const spread=100*(ask-bid)/((ask+bid)/2);
+    updates.push({name:m.name,spread,price:Number(t.c?.[0])});
+   }
+   // Depth requests are deliberately limited to the first two candidates to reduce API usage.
+   for(const m of watchlist.slice(0,2)){
+    try{
+     const d=await api('Depth',{pair:m.id,count:10});
+     const book=Object.values(d)[0],u=updates.find(x=>x.name===m.name);
+     if(!book||!u)continue;
+     const sum=side=>(book[side]||[]).reduce((n,x)=>n+Number(x[0])*Number(x[1]),0);
+     const buys=sum('bids'),sells=sum('asks');
+     u.pressure=sells>0?buys/sells:null;
+    }catch{}
+   }
+   watchAt=now();
+   const host=$('watchRadar');if(host){
+    host.textContent='Controllo rapido '+new Date(watchAt).toLocaleTimeString('it-IT')+' · '+updates.map(x=>x.name+': spread '+fmt(x.spread,2)+'%'+(x.pressure!==undefined&&x.pressure!==null?' · book acquisti/vendite ×'+fmt(x.pressure,2):'')).join(' | ')+' · Dati istantanei, non segnali di acquisto.';
+   }
+  }catch(e){set('watchRadar','Controllo rapido non disponibile: '+e.message)}
+  finally{watchBusy=false}
+ }
  $('scanNow')?.addEventListener('click',scan);
  $('prepareOrder')?.setAttribute('disabled','');
  window.krakenSelectedOrder=null;
@@ -112,5 +144,5 @@
  set('status','Radar Accelerazioni · sola analisi');
  showBalances();
  setTimeout(()=>scan(),1200);
- setInterval(()=>{if(!document.hidden)scan()},300000);
+ setInterval(()=>{if(!document.hidden)scan()},300000);setInterval(watch,30000);
 })();
