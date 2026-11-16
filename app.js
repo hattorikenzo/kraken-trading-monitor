@@ -66,8 +66,15 @@
   const spreadOk=m.spread<=0.35&&m.turnover>=100000;
   const score=[volOk,breakout,trend,rsiOk,spreadOk].filter(Boolean).length;
   const move=100*(last.c/closes.at(-4)-1);
-  const eligible=score===5&&move>0&&move<5;
-  return {...m,score,volumeRatio,breakout,trend,rsi:rs,spreadOk,move,eligible};
+  const missing=[!volOk?'volume':null,!breakout?'breakout':null,!trend?'trend 1h':null,!rsiOk?'RSI':null,!spreadOk?'spread/liquidità':null].filter(Boolean);
+  // 5/5 is a technical score, not a buy recommendation. Avoid chasing
+  // a move when volume is weak or RSI is near the upper limit.
+  const volumeConfirmed=volumeRatio>=3;
+  const notExtended=rs<70&&move>0&&move<3;
+  const eligible=score===5&&volumeConfirmed&&notExtended;
+  const verdict=eligible?'DA VALUTARE':score>=4?'OSSERVA':'ATTENDI';
+  const reason=missing.length?'Manca: '+missing.join(', '):!notExtended?'Movimento esteso o RSI elevato':'Segnali tecnici presenti';
+  return {...m,score,volumeRatio,breakout,trend,rsi:rs,spreadOk,move,eligible,verdict,reason};
  }
  async function scan(){
   if(scanning)return;scanning=true;set('decisionStatus','ANALISI');set('decision','Radar in esecuzione: verifica volumi, rotture, RSI, trend e spread. Nessun ordine viene inviato.');
@@ -104,20 +111,20 @@
      else failed.push(selected[i+j].name);
     }
    }
-   rows=out.sort((a,b)=>b.score-a.score||b.volumeRatio-a.volumeRatio);watchlist=rows.slice(0,5).map(x=>({id:x.id,name:x.name,base:x.base,quote:x.quote}));
+   rows=out.sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.score-a.score||b.volumeRatio-a.volumeRatio);watchlist=rows.slice(0,5).map(x=>({id:x.id,name:x.name,base:x.base,quote:x.quote}));
    lastScan=now();
    const best=rows.find(x=>x.eligible);
    const display=rows.slice(0,10);
    const tbody=$('opportunities');
-   if(tbody)tbody.innerHTML=display.length?display.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+x.score+'/5</td><td>Volume ×'+fmt(x.volumeRatio,1)+' · RSI '+fmt(x.rsi,0)+'</td><td>'+fmt(x.move,2)+'% (15 min)</td><td>'+(x.eligible?'DA VALUTARE':'ATTENDI')+'</td></tr>').join(''):'<tr><td colspan="5">Nessun dato tecnico recente disponibile.</td></tr>';
+   if(tbody)tbody.innerHTML=display.length?display.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+x.score+'/5</td><td>Volume ×'+fmt(x.volumeRatio,1)+' · RSI '+fmt(x.rsi,0)+'<br><small>'+esc(x.reason)+'</small></td><td>'+fmt(x.move,2)+'% (15 min)</td><td>'+x.verdict+'</td></tr>').join(''):'<tr><td colspan="5">Nessun dato tecnico recente disponibile.</td></tr>';
    set('marketCount',String(candidates.length));
    set('coverage','Analizzati '+out.length+'/'+selected.length+' mercati selezionati (20 liquidi + fino a 28 a rotazione); '+candidates.length+' mercati preliminarmente praticabili. Dati OHLC mancanti/non validi: '+failed.length+'. Copertura completa solo dopo più scansioni.');
    set('scanTime',new Date(lastScan).toLocaleTimeString('it-IT'));
    set('scanDetails','Punteggio: volume ≥3× media 20 candele, breakout confermato, trend 1h, RSI 50–75 in salita, spread ≤0,35%. Solo candele chiuse. Rotazione: '+Math.max(0,selected.length-20)+' mercati variabili per scansione; chiamate OHLC distanziate di 1,1 s. Non è una scansione esaustiva istantanea.');
    set('decisionStatus',best?'DA VALUTARE':'ATTENDI');
-   set('decision',best?'Possibile accelerazione '+best.name+' ('+best.score+'/5). Non è un ordine: verificare prezzo attuale, minimi, commissioni e saldo disponibile.':'Nessuna accelerazione con tutti e 5 i segnali confermati. Non comprare solo per inseguire i rialzi.');
+   set('decision',best?'Possibile accelerazione '+best.name+' ('+best.score+'/5), volume ×'+fmt(best.volumeRatio,1)+', RSI '+fmt(best.rsi,0)+'. DA VALUTARE, non acquistare senza verificare commissioni, minimo ordine e saldo.':rows[0]?'Miglior candidato '+rows[0].name+' '+rows[0].score+'/5: '+rows[0].reason+'. '+(rows[0].score>=4?'OSSERVA, non acquistare senza conferma di volume e rischio.':'ATTENDI: condizioni insufficienti.'):'Nessun segnale recente verificabile. ATTENDI.');
    set('simpleCryptoMarket',display.slice(0,3).map(x=>x.name+' '+x.score+'/5').join(' · ')||'Nessun candidato');
-   set('analysisText','RADAR ACCELERAZIONI — '+new Date(lastScan).toLocaleString('it-IT')+'\nCopertura: '+out.length+'/'+selected.length+' analizzati, '+candidates.length+' mercati preliminari, '+failed.length+' senza OHLC valido. Rotazione #'+scanRotation+'\n'+rows.slice(0,10).map(x=>x.name+' | '+x.score+'/5 | volume x'+fmt(x.volumeRatio,1)+' | RSI '+fmt(x.rsi,1)+' | '+(x.eligible?'DA VALUTARE':'ATTENDI')).join('\n'));
+   set('analysisText','RADAR ACCELERAZIONI — '+new Date(lastScan).toLocaleString('it-IT')+'\nCopertura: '+out.length+'/'+selected.length+' analizzati, '+candidates.length+' mercati preliminari, '+failed.length+' senza OHLC valido. Rotazione #'+scanRotation+'\n'+rows.slice(0,10).map(x=>x.name+' | '+x.score+'/5 | volume x'+fmt(x.volumeRatio,1)+' | RSI '+fmt(x.rsi,1)+' | '+(x.verdict+' | '+x.reason)).join('\n'));
   }catch(e){set('decisionStatus','ERRORE');set('decision','Scansione non verificata: '+e.message);set('scanTime','Errore');}
   finally{scanning=false;$('scanNow').disabled=false}
  }
