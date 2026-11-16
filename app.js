@@ -103,12 +103,23 @@
    }
    scanRotation++;
    const selected=[...core,...rotating],out=[],failed=[];
+   set('scanTime','0/'+selected.length+' mercati');
+   set('coverage','Scansione avviata: 0/'+selected.length+' mercati. Il primo giro può richiedere circa 2 minuti; non chiudere la pagina.');
+   set('watchRadar','Scansione iniziale in corso: '+selected.length+' mercati selezionati. Attendere il completamento.');
    for(let i=0;i<selected.length;i+=3){
     const batch=await Promise.allSettled(selected.slice(i,i+3).map(momentum));
     for(let j=0;j<batch.length;j++){
      const r=batch[j];
      if(r.status==='fulfilled'&&r.value)out.push(r.value);
      else failed.push(selected[i+j].name);
+    }
+    const done=Math.min(i+3,selected.length);
+    set('scanTime',done+'/'+selected.length+' mercati');
+    set('coverage','Scansione in corso: '+done+'/'+selected.length+' mercati controllati, '+out.length+' con dati validi, '+failed.length+' senza dati validi.');
+    if(out.length){
+     const preview=out.slice().sort((a,b)=>b.score-a.score||b.volumeRatio-a.volumeRatio).slice(0,10);
+     const body=$('opportunities');
+     if(body)body.innerHTML=preview.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+x.score+'/5</td><td>Volume ×'+fmt(x.volumeRatio,1)+' · RSI '+fmt(x.rsi,0)+'<br><small>'+esc(x.reason)+'</small></td><td>'+fmt(x.move,2)+'% (15 min)</td><td>'+x.verdict+'</td></tr>').join('');
     }
    }
    rows=out.sort((a,b)=>Number(b.eligible)-Number(a.eligible)||b.score-a.score||b.volumeRatio-a.volumeRatio);watchlist=rows.slice(0,5).map(x=>({id:x.id,name:x.name,base:x.base,quote:x.quote}));
@@ -125,7 +136,7 @@
    set('decision',best?'Possibile accelerazione '+best.name+' ('+best.score+'/5), volume ×'+fmt(best.volumeRatio,1)+', RSI '+fmt(best.rsi,0)+'. DA VALUTARE, non acquistare senza verificare commissioni, minimo ordine e saldo.':rows[0]?'Miglior candidato '+rows[0].name+' '+rows[0].score+'/5: '+rows[0].reason+'. '+(rows[0].score>=4?'OSSERVA, non acquistare senza conferma di volume e rischio.':'ATTENDI: condizioni insufficienti.'):'Nessun segnale recente verificabile. ATTENDI.');
    set('simpleCryptoMarket',display.slice(0,3).map(x=>x.name+' '+x.score+'/5').join(' · ')||'Nessun candidato');
    set('analysisText','RADAR ACCELERAZIONI — '+new Date(lastScan).toLocaleString('it-IT')+'\nCopertura: '+out.length+'/'+selected.length+' analizzati, '+candidates.length+' mercati preliminari, '+failed.length+' senza OHLC valido. Rotazione #'+scanRotation+'\n'+rows.slice(0,10).map(x=>x.name+' | '+x.score+'/5 | volume x'+fmt(x.volumeRatio,1)+' | RSI '+fmt(x.rsi,1)+' | '+(x.verdict+' | '+x.reason)).join('\n'));
-  }catch(e){set('decisionStatus','ERRORE');set('decision','Scansione non verificata: '+e.message);set('scanTime','Errore');}
+  }catch(e){set('decisionStatus','ERRORE');set('decision','Scansione non verificata: '+e.message);set('scanTime','Errore');set('coverage','Errore scanner: '+e.message);set('watchRadar','Errore scanner: '+e.message);}
   finally{scanning=false;$('scanNow').disabled=false}
  }
  // Watchlist: lightweight public Ticker + Depth checks every 30s. Not an execution signal.
