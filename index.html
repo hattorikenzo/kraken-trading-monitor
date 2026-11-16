@@ -66,7 +66,7 @@ body{background:#0b1120;color:#e9effa}.shell{max-width:780px;padding:12px}.topba
 #simpleDashboard .preview{border:1px solid #30415b;background:#152238;padding:16px;margin-top:12px}
 #simpleDashboard .simple-state{font-size:1.5rem}
 #simpleAnalyze{width:100%;font-size:1.1rem;font-weight:700;min-height:52px;background:#3374f5}
-#simpleBuy,#simpleSell{display:none!important}
+#simpleBuy,#simpleSell{display:inline-flex!important;align-items:center;justify-content:center}#simpleSell{background:#34445f}#simpleDashboard details{display:block!important}
 #simpleDashboard .simple-market{display:none}
 #simpleDashboard .simple-market:first-child{display:block;border:0;padding:0}
 #simpleDashboard .simple-grid:has(.simple-market){display:block!important}
@@ -95,9 +95,9 @@ body{background:#0b1120;color:#e9effa}.shell{max-width:780px;padding:12px}.topba
 <div class="preview" style="margin-top:14px">
 <small>Indicazione del bot crypto</small><div id="simpleSignal" class="simple-state">ATTENDI</div><p id="simpleReason">Premi Analizza per verificare il mercato.</p>
 <p id="simpleUpdated" class="simple-note">Nessuna scansione verificata</p></div>
-<div class="simple-actions" style="margin-top:14px"><button id="simpleAnalyze" type="button">Analizza ora</button><button id="simpleBuy" type="button" hidden disabled>Compra</button><button id="simpleSell" type="button" hidden disabled>Vendi</button></div>
-<p id="simpleActionInfo" class="simple-note" role="status">Radar informativo: acquisti e vendite disabilitati. Puoi operare manualmente su Kraken Pro dopo aver verificato i dati.</p>
-<h3>Le criptovalute in accelerazione</h3><div id="radarTableHome"></div><p id="watchRadar" class="simple-note" role="status">Controllo rapido in attesa della prima scansione.</p><div class="simple-grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+<div class="simple-actions" style="margin-top:14px"><button id="simpleAnalyze" type="button">Analizza ora</button><button id="simpleBuy" type="button">Valuta acquisto</button><button id="simpleSell" type="button">Valuta vendita</button></div>
+<p id="simpleActionInfo" class="simple-note" role="status">I pulsanti aiutano a valutare una scelta, ma non inviano ordini. Il trading reale resta bloccato in STAGING.</p>
+<h3>Mercati migliori · Crypto e azioni</h3><p class="simple-note">Crypto: scanner Kraken con punteggio tecnico, non raccomandazioni di acquisto. Azioni: analisi separata, senza prezzi live verificati qui.</p><div id="simpleStockEntry" class="simple-market" style="display:block!important"><b>Azioni globali</b><p class="simple-note">Consulta i titoli e i costi prima di scegliere. Non sono disponibili ordini azionari dal bot.</p><a href="./stocks.html">Analizza azioni</a></div><div id="radarTableHome"></div><p id="watchRadar" class="simple-note" role="status">Controllo rapido in attesa della prima scansione.</p><div class="simple-grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
 <div class="simple-market"><b>Criptovalute · Kraken</b><p id="simpleCryptoMarket" class="simple-note">In attesa di analisi.</p></div>
 <div class="simple-market"><b>Azioni · mercati globali</b><p class="simple-note">Ricerca informativa separata. Nessun titolo raccomandato senza quotazioni e costi verificati.</p><a href="./stocks.html">Apri analisi azioni</a></div>
 </div>
@@ -170,5 +170,28 @@ body{background:#0b1120;color:#e9effa}.shell{max-width:780px;padding:12px}.topba
  const observer=new MutationObserver(render);
  for(const node of [balance,signal,reason,opps,scanTime])if(node)observer.observe(node,{childList:true,subtree:true,characterData:true});
  render();
+})();
+</script><script id="simpleActionPatch">
+(function(){
+ const $=id=>document.getElementById(id);
+ const buy=$('simpleBuy'),sell=$('simpleSell'),msg=$('simpleActionInfo');
+ if(!buy||!sell||!msg)return;
+ buy.hidden=false;sell.hidden=false;buy.disabled=false;sell.disabled=false;
+ function advise(action){
+  const state=($('decisionStatus')?.textContent||'').trim();
+  const decision=($('decision')?.textContent||'').trim();
+  const balance=($('simpleBalance')?.textContent||'').trim();
+  const crypto=($('simpleCryptoMarket')?.textContent||'').trim();
+  const text=action==='buy'
+   ? 'ACQUISTO NON AUTORIZZATO DAL BOT. Stato: '+state+'. '+decision+' Saldo letto: '+balance+'. Mercati: '+crypto+'. Nessun ordine è stato inviato.'
+   : 'VENDITA: controlla prima quale asset possiedi e la quantità disponibile sul conto Kraken Pro. Il radar non ha certificato una proposta di vendita. Nessun ordine è stato inviato.';
+  msg.textContent=text;
+  const details=$('advancedDashboard')?.closest('details');
+  if(details)details.open=true;
+  msg.scrollIntoView({behavior:'smooth',block:'nearest'});
+ }
+ // Capture listeners run before any legacy click handlers; never invoke trade submission.
+ buy.addEventListener('click',e=>{e.stopImmediatePropagation();advise('buy')},true);
+ sell.addEventListener('click',e=>{e.stopImmediatePropagation();advise('sell')},true);
 })();
 </script></body></html>
