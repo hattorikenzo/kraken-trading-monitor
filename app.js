@@ -8,16 +8,17 @@
  const MAX_TRADE=5, MIN_LIQUID_RESERVE=5;
  const FIAT=new Set(['USD','USDC','USDT','EUR','GBP','ZGBP','CHF','CAD','ZCAD','AUD','ZAUD','JPY','ZJPY','ZUSD','ZEUR','ZCHF','ZGBP','ZCAD','ZAR','BRL','TRY','PLN']);
  const isCrypto=s=>!FIAT.has(String(s).toUpperCase()); // limite del monitor; la funzione di validazione ha limiti propri.
- let balance=null,balanceAt=0,scanning=false,results=[],lastStats=''; let selectedLive=null; let holdings={},portfolioAt=0,openCount=null,heldSignals=[];
+ let balance=null,balanceAt=0,balanceCurrency='USDC',scanning=false,results=[],lastStats=''; let selectedLive=null; let holdings={},portfolioAt=0,openCount=null,heldSignals=[];
  let settings={maxTrade:5,fee:0.8,slippage:0.15}; let diagnostics=null;
  try{const s=JSON.parse(localStorage.getItem('kraken_bot_v3_settings'));if(s)settings={...settings,...s}}catch{}
  settings.maxTrade=Math.min(MAX_TRADE,Math.max(1,Number(settings.maxTrade)||MAX_TRADE));
  for(const k of ['maxTrade','fee','slippage'])if($(k))$(k).value=settings[k];
  const setStatus=s=>{$('status').textContent=s};
- function showBalance(){const fresh=balance!==null&&Date.now()-balanceAt<300000;$('realBalance').textContent=balance===null?'—':fmt(balance,6)+' USDC';$('balanceTime').textContent=balanceAt?new Date(balanceAt).toLocaleString('it-IT'):'Non ancora letto';$('budgetValue').textContent=fresh?fmt(Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance-MIN_LIQUID_RESERVE)),2)+' USDC':'—';}
- window.addEventListener('kraken-balance',e=>{const v=e.detail?.balances?.USDC;balance=typeof v==='string'&&/^\d+(?:\.\d+)?$/.test(v)?Number(v):null;balanceAt=Date.parse(e.detail?.timestamp)||Date.now();showBalance();render()});
+ function showBalance(){const fresh=balance!==null&&Date.now()-balanceAt<300000;$('realBalance').textContent=balance===null?'—':fmt(balance,6)+' '+balanceCurrency;$('balanceTime').textContent=balanceAt?new Date(balanceAt).toLocaleString('it-IT'):'Non ancora letto';$('budgetValue').textContent=fresh?fmt(Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance-MIN_LIQUID_RESERVE)),2)+' '+balanceCurrency:'—';}
+ // Display verified cash balances, never infer funds from historic or manually entered figures.
+ window.addEventListener('kraken-balance',e=>{const raw=e.detail?.balances||{};const parse=v=>{const n=Number(v);return v!==null&&v!==undefined&&String(v).trim()!==''&&Number.isFinite(n)&&n>=0?n:0};const usd=parse(raw.USD??raw.ZUSD);const usdc=parse(raw.USDC);balanceCurrency=usd>0?'USD':'USDC';balance=balanceCurrency==='USD'?usd:usdc;balanceAt=Date.parse(e.detail?.timestamp)||Date.now();selectedLive=null;window.krakenSelectedOrder=null;showBalance();render()});
  window.addEventListener('kraken-portfolio',e=>{holdings=e.detail?.holdings||{};portfolioAt=Number(e.detail?.at)||Date.now();openCount=Number.isInteger(Number(e.detail?.openCount))&&e.detail?.openCount!=null?Number(e.detail.openCount):null;render();});
-  window.addEventListener('kraken-auth-logout',()=>{holdings={};portfolioAt=0;openCount=null;balance=null;balanceAt=0;selectedLive=null;window.krakenSelectedOrder=null;showBalance();render()});
+  window.addEventListener('kraken-auth-logout',()=>{holdings={};portfolioAt=0;openCount=null;balance=null;balanceAt=0;balanceCurrency='USDC';selectedLive=null;window.krakenSelectedOrder=null;showBalance();render()});
  window.addEventListener('kraken-auth-ready',()=>void readBalance());
  async function readBalance(){if(typeof window.krakenReadBalance!=='function')return;const b=$('refreshBalance');b.disabled=true;try{await window.krakenReadBalance()}catch(e){balance=null;balanceAt=0;showBalance();$('decision').textContent='Saldo non disponibile: '+e.message}finally{b.disabled=false}}
  $('refreshBalance').onclick=()=>void readBalance();
@@ -132,7 +133,7 @@ function marketOverview(pairs,tickers){
  function dynamicBudget(candidate){
   // Conservative proposal only: account balance is NOT an authoritative atomic reservation.
   // Keep 5 USDC liquid, include estimated fee and slippage within the 5 USDC debit cap.
-  const fresh=balance!==null&&Date.now()-balanceAt<300000;
+  const fresh=balanceCurrency==='USDC'&&balance!==null&&Date.now()-balanceAt<300000;
   if(!candidate||!candidate.eligible||!fresh)return 0;
   const estimatedMultiplier=1+(Math.max(0,Number(settings.fee)||0)+Math.max(0,Number(settings.slippage)||0))/100;
   const liquid=Math.max(0,Number(balance)-MIN_LIQUID_RESERVE);
@@ -157,7 +158,7 @@ function marketOverview(pairs,tickers){
   lines.push('Richiesta per ChatGPT: valuta tutti i mercati elencati e la copertura effettiva, senza confondere i primi 5 con l’intero mercato. Non inviare ordini e non chiedere credenziali.');
   return lines.join('\\n');
  }
- function render(){const fresh=balance!==null&&Date.now()-balanceAt<300000;const top=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||Number(b.trend)-Number(a.trend)||b.score-a.score).slice(0,5);
+ function render(){const fresh=balanceCurrency==='USDC'&&balance!==null&&Date.now()-balanceAt<300000;const top=results.filter(x=>x.route.length===1&&x.route[0].market.quote==='USDC').slice().sort((a,b)=>Number(b.eligible)-Number(a.eligible)||Number(b.fastOk)-Number(a.fastOk)||Number(b.trend)-Number(a.trend)||b.score-a.score).slice(0,5);
   $('opportunities').innerHTML=top.map(x=>{
    const verdict=x.eligible?'DA VALUTARE':!x.trend?'SCARTATO':x.fastChecked&&!x.fastOk?'ATTENDERE':'SCARTATO';
    const why=x.eligible?'Filtri tecnici ed economici superati':!x.trend?'Segnale orario assente':x.fastChecked&&!x.fastOk?'15m non confermato; '+x.why:x.why;
@@ -184,7 +185,7 @@ function marketOverview(pairs,tickers){
  async function scan(){if(scanning)return;scanning=true;results=[];diagnostics=null;selectedLive=null;window.krakenSelectedOrder=null;$('prepareOrder').disabled=true;$('scanNow').disabled=true;setStatus('Analisi di tutte le coppie spot…');try{
   const all=markets(await api('AssetPairs'));$('marketCount').textContent=String(all.length);
   // Ticker senza parametro pair: snapshot di tutti i mercati. Nessuna richiesta OHLC per migliaia di coppie.
-  const tickers=await api('Ticker');marketOverview(all,tickers);const {graph,market}=graphFrom(all,tickers);const paths=routes(graph);const amount=Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance!==null?balance-MIN_LIQUID_RESERVE:MAX_TRADE)/(1+(Math.max(0,settings.fee)+Math.max(0,settings.slippage))/100));
+  const tickers=await api('Ticker');marketOverview(all,tickers);const {graph,market}=graphFrom(all,tickers);const paths=balanceCurrency==='USDC'?routes(graph):[];const amount=Math.max(0,Math.min(MAX_TRADE,settings.maxTrade,balance!==null?balance-MIN_LIQUID_RESERVE:MAX_TRADE)/(1+(Math.max(0,settings.fee)+Math.max(0,settings.slippage))/100));
   // Valutiamo TUTTI i percorsi a prezzi bid/ask, poi usiamo OHLC solo sui candidati più praticabili.
   const eligiblePaths=paths.map(path=>({path,metrics:routeMetrics(path,amount)})).filter(x=>x.metrics.ok&&x.metrics.costPct<5&&x.path.every(e=>e.market.spread<=1));
    // Diversificazione: non scegliere i 50 OHLC soltanto in base allo spread.
