@@ -9,7 +9,7 @@
  const fiat=new Set(['USD','EUR','GBP','USDC','USDT','CAD','CHF','AUD','JPY']);
  const fmt=(n,d=2)=>Number.isFinite(n)?n.toLocaleString('it-IT',{maximumFractionDigits:d,minimumFractionDigits:d}):'—';
  const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- let balances=null,balancesAt=0,portfolio={},scanning=false,lastScan=null,rows=[],watchlist=[],watchBusy=false,watchAt=0;
+ let balances=null,balancesAt=0,portfolio={},scanning=false,lastScan=null,rows=[],watchlist=[],watchBusy=false,watchAt=0,scanRotation=0,ohlcNextAt=0;
  const set=(id,s)=>{if($(id))$(id).textContent=s};
  const now=()=>Date.now();
  async function api(path,params={}){
@@ -46,8 +46,13 @@
   const t=now()/1000;
   return list.filter(x=>Number(x[0])+interval*60<=t).map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[6]})).filter(x=>x.c>0&&x.v>=0).sort((a,b)=>a.t-b.t);
  }
+ async function pacedOhlc(pair,interval){
+  const wait=Math.max(0,ohlcNextAt-now());ohlcNextAt=Math.max(now(),ohlcNextAt)+1100;
+  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
+  return api('OHLC',{pair,interval});
+ }
  async function momentum(m){
-  const [r5,r60]=await Promise.all([api('OHLC',{pair:m.id,interval:5}),api('OHLC',{pair:m.id,interval:60})]);
+  const [r5,r60]=await Promise.all([pacedOhlc(m.id,5),pacedOhlc(m.id,60)]);
   const c5=candles(r5,5),c60=candles(r60,60);
   if(c5.length<45||c60.length<26||now()/1000-c5.at(-1).t>900||now()/1000-c60.at(-1).t>10800)return null;
   const closes=c5.map(x=>x.c),hour=c60.map(x=>x.c);
@@ -81,12 +86,23 @@
     candidates.push({id,name:p.wsname,base,quote,spread,turnover,change:+t.o>0?100*(last/+t.o-1):0});
    }
    candidates.sort((a,b)=>b.turnover-a.turnover);
-   // The public OHLC endpoint is rate limited: sample the 35 most liquid markets,
-   // with 3 concurrent requests, rather than asserting full market coverage.
-   const selected=candidates.slice(0,35),out=[];
+   // Broad rotating coverage: always inspect 20 liquid leaders, plus 28 from
+   // the remaining eligible markets, rotating each scan. OHLC is paced globally
+   // at ~1 request/second to respect Kraken's public REST guidance.
+   const core=candidates.slice(0,20),tail=candidates.slice(20),rotating=[];
+   if(tail.length){
+    const start=(scanRotation*28)%tail.length;
+    for(let i=0;i<Math.min(28,tail.length);i++)rotating.push(tail[(start+i)%tail.length]);
+   }
+   scanRotation++;
+   const selected=[...core,...rotating],out=[],failed=[];
    for(let i=0;i<selected.length;i+=3){
     const batch=await Promise.allSettled(selected.slice(i,i+3).map(momentum));
-    for(const r of batch)if(r.status==='fulfilled'&&r.value)out.push(r.value);
+    for(let j=0;j<batch.length;j++){
+     const r=batch[j];
+     if(r.status==='fulfilled'&&r.value)out.push(r.value);
+     else failed.push(selected[i+j].name);
+    }
    }
    rows=out.sort((a,b)=>b.score-a.score||b.volumeRatio-a.volumeRatio);watchlist=rows.slice(0,5).map(x=>({id:x.id,name:x.name,base:x.base,quote:x.quote}));
    lastScan=now();
@@ -95,13 +111,13 @@
    const tbody=$('opportunities');
    if(tbody)tbody.innerHTML=display.length?display.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+x.score+'/5</td><td>Volume ×'+fmt(x.volumeRatio,1)+' · RSI '+fmt(x.rsi,0)+'</td><td>'+fmt(x.move,2)+'% (15 min)</td><td>'+(x.eligible?'DA VALUTARE':'ATTENDI')+'</td></tr>').join(''):'<tr><td colspan="5">Nessun dato tecnico recente disponibile.</td></tr>';
    set('marketCount',String(candidates.length));
-   set('coverage','Analizzati '+out.length+' mercati su '+selected.length+' selezionati per liquidità; universo iniziale '+candidates.length+'.');
+   set('coverage','Analizzati '+out.length+'/'+selected.length+' mercati selezionati (20 liquidi + fino a 28 a rotazione); '+candidates.length+' mercati preliminarmente praticabili. Dati OHLC mancanti/non validi: '+failed.length+'. Copertura completa solo dopo più scansioni.');
    set('scanTime',new Date(lastScan).toLocaleTimeString('it-IT'));
-   set('scanDetails','Punteggio: volume ≥3× media 20 candele, breakout confermato, trend 1h, RSI 50–75 in salita, spread ≤0,35%. Solo candele chiuse. Dati pubblici.');
+   set('scanDetails','Punteggio: volume ≥3× media 20 candele, breakout confermato, trend 1h, RSI 50–75 in salita, spread ≤0,35%. Solo candele chiuse. Rotazione: '+Math.max(0,selected.length-20)+' mercati variabili per scansione; chiamate OHLC distanziate di 1,1 s. Non è una scansione esaustiva istantanea.');
    set('decisionStatus',best?'DA VALUTARE':'ATTENDI');
    set('decision',best?'Possibile accelerazione '+best.name+' ('+best.score+'/5). Non è un ordine: verificare prezzo attuale, minimi, commissioni e saldo disponibile.':'Nessuna accelerazione con tutti e 5 i segnali confermati. Non comprare solo per inseguire i rialzi.');
    set('simpleCryptoMarket',display.slice(0,3).map(x=>x.name+' '+x.score+'/5').join(' · ')||'Nessun candidato');
-   set('analysisText','RADAR ACCELERAZIONI — '+new Date(lastScan).toLocaleString('it-IT')+'\n'+rows.slice(0,10).map(x=>x.name+' | '+x.score+'/5 | volume x'+fmt(x.volumeRatio,1)+' | RSI '+fmt(x.rsi,1)+' | '+(x.eligible?'DA VALUTARE':'ATTENDI')).join('\n'));
+   set('analysisText','RADAR ACCELERAZIONI — '+new Date(lastScan).toLocaleString('it-IT')+'\nCopertura: '+out.length+'/'+selected.length+' analizzati, '+candidates.length+' mercati preliminari, '+failed.length+' senza OHLC valido. Rotazione #'+scanRotation+'\n'+rows.slice(0,10).map(x=>x.name+' | '+x.score+'/5 | volume x'+fmt(x.volumeRatio,1)+' | RSI '+fmt(x.rsi,1)+' | '+(x.eligible?'DA VALUTARE':'ATTENDI')).join('\n'));
   }catch(e){set('decisionStatus','ERRORE');set('decision','Scansione non verificata: '+e.message);set('scanTime','Errore');}
   finally{scanning=false;$('scanNow').disabled=false}
  }
