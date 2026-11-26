@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - app.js
+      - index.html
+      - r10-strategies.js
+      - r10-backtest.js
       - .github/workflows/scanner-budget-regression.yml
 permissions:
   contents: read
@@ -12,59 +15,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Syntax and budget invariants
-        shell: bash
+      - name: Syntax and R10 behavioral invariants
         run: |
-          set -euo pipefail
           node --check app.js
+          node --check r10-strategies.js
+          node --check r10-backtest.js
           node <<'NODE'
-          const fs=require('node:fs'),assert=require('node:assert/strict');
-          const src=fs.readFileSync('app.js','utf8');
-          assert(!src.includes('ratio>=1.25&&amount>=5'),'obsolete impossible gate');
-          assert(src.includes('ratio>=1.25;'),'risk/reward gate preserved');
-          assert(src.includes('routeMetrics(candidate.route,notional).ok'),'final minimum check');
-          assert(src.includes('MIN_LIQUID_RESERVE=5'),'reserve unchanged');
-          assert(src.includes('MAX_TRADE=5'),'5 USDC cap unchanged');
-          const fee=0.8,slippage=0.15,cap=5,reserve=5;
-          function budget(balance){
-            const gross=Math.min(cap,Math.max(0,balance-reserve));
-            return Math.floor(gross/(1+(fee+slippage)/100)*100)/100;
+          const fs=require('node:fs'),assert=require('node:assert/strict'),vm=require('node:vm');
+          const src=fs.readFileSync('app.js','utf8'),html=fs.readFileSync('index.html','utf8');
+          const elements={},events={};
+          const document={getElementById:id=>elements[id]??=( {textContent:'',addEventListener(){},setAttribute(){}} )};
+          const window={addEventListener:(name,fn)=>events[name]=fn};
+          vm.runInNewContext(src,{document,window,setTimeout(){},setInterval(){}});
+          for(const [balance,expected] of [[39,10],[15,10],[10,5],[5,0],[4,0],[7,2]]){
+            events['kraken-balance']({detail:{balances:{ZEUR:balance,ZUSD:100}}});
+            assert.equal(Number(elements.budgetValue.textContent.split(' ')[0].replace(',','.')),expected);
           }
-          for(const [balance,expected] of [[39.010433,4.95],[10,4.95],[5,0],[4,0],[7,1.98]]){
-            assert.equal(budget(balance),expected,'balance='+balance);
-            assert(budget(balance)*(1+(fee+slippage)/100)<=Math.min(cap,Math.max(0,balance-reserve))+1e-8);
-          }
-          // Simulate Kraken ordermin/costmin at the computed trade amount.
-          const notional=budget(39.010433);
-          const meetsMin=(ask,ordermin,costmin)=>notional>=Math.max(ordermin*ask,costmin);
-          assert(meetsMin(100,0.01,2.5));
-          assert(!meetsMin(100,0.06,2.5));
-          assert(!meetsMin(100,0.01,5.1));
-          assert(!src.includes('AddOrder('),'scanner must not directly submit Kraken orders');
-          for(const field of ['ATR=','target=','stop=','guadagno netto teorico=','perdita netta teorica=','rapporto netto=','spread=','conferma15m=']){
-            assert(src.includes(field),'missing scanner diagnostic: '+field);
-          }
-          assert(src.includes('CONVENIENZA ECONOMICA INSUFFICIENTE → NESSUN ORDINE'));
-          assert(src.includes('x.trend&&!economicOk(x)'));
-          assert(src.includes('x.gain>0&&x.loss<0&&x.ratio>=1.25'));
-          assert(src.includes('DIAGNOSTICA v3.9.0 STAGING'));
-          assert(!src.includes('DIAGNOSTICA v3.8.0'));
-          assert(src.includes('(x.structural||x.trend)'),'15m must include hourly signals');
-          assert(src.includes('x.eligible=x.structural&&x.fastOk&&x.trend'),'informational checks cannot enable orders');
-          assert(src.includes('SOLO INFORMATIVO'),'informational label missing');
-          assert(src.includes('SEGNALE 1h E 15m CONFERMATI'));
-          assert(src.includes('15m NON CONFERMATO'));
-          assert(src.includes('function marketOverview(pairs,tickers)'));
-          assert(src.includes("marketOverview(all,tickers)"));
-          assert(src.includes("vol*Number(t.p?.[1]||last)"));
-          assert(src.includes("quote==='USDC'?'USDC spot':'Altra valuta (informativo)'"));
-          assert(src.includes("const liquid=rows.filter(x=>x.turnover>=10000&&x.trades>=30&&x.spread<=0.6)"));
-          console.log('PASS_MARKET_RADAR_PUBLIC_DATA_NO_TRADE');
-          console.log('PASS_STAGING_390_INFORMATIONAL_15M_SAFETY');
-          console.log('PASS_FULL_MARKET_DIAGNOSTIC_EXPORT');
-          console.log('PASS_SCANNER_SYNTAX');
-          console.log('PASS_FEE_INCLUSIVE_CAP_AND_RESERVE');
-          console.log('PASS_5_USDC_GATE_REMOVED');
-          console.log('PASS_KRAKEN_MINIMUM_CHECK');
-          console.log('PASS_NO_DIRECT_ADDORDER');
+          events['kraken-balance']({detail:{balances:{ZUSD:100,USDC:100}}});
+          assert.equal(elements.budgetValue.textContent,'0,00 EUR');
+          assert.equal(window.krakenSelectedOrder,null);
+          assert(!/AddOrder\s*\(/.test(src));
+          assert(src.includes("quote!=='EUR'"));
+          assert(src.includes('scanRotation*48'));
+          assert(html.indexOf('src="r10-strategies.js"')>=0);
+          assert(html.indexOf('src="r10-strategies.js"')<html.indexOf('src="app.js'));
+          const {evaluate}=require('./r10-strategies.js');
+          const candles=Array.from({length:30},(_,i)=>({c:100+i/100,h:101+i/100,l:99+i/100,v:100}));
+          assert.deepEqual(evaluate([],candles,0.1,200000),[]);
+          assert.deepEqual(evaluate(candles,candles,1,200000),[]);
+          assert.deepEqual(evaluate(candles,candles,0.1,100),[]);
+          const result=evaluate(candles,candles,0.1,200000);
+          assert.equal(result.length,4);
+          assert(result.every(x=>!x.signal||x.reward/x.risk>=1.25));
+          const {simulate}=require('./r10-backtest.js');
+          const bars=Array.from({length:40},(_,i)=>({t:i*300,o:100,c:100,h:101,l:99,turnover:200000,minCost:1}));
+          const hours=Array.from({length:30},(_,i)=>({t:-108000+i*3600,c:100,h:101,l:99,v:100}));
+          const books=simulate(bars,hours,()=>[{strategy:'breakout',signal:true,cost:0.02,risk:0.04,reward:0.06}]);
+          assert.equal(Object.keys(books).length,4);
+          assert(books.breakout.position);
+          assert(books.breakout.cash>=5);
+          assert.equal(books.momentum.cash,35);
+          assert.equal(books.breakout.position.debit,10);
+          console.log('PASS_R10_BACKTEST_ISOLATION');
+          console.log('PASS_R10_EUR_BUDGET_RESERVE_NO_ORDER_STRATEGIES');
           NODE
