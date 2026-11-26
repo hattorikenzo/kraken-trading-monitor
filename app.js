@@ -71,10 +71,12 @@
   // a move when volume is weak or RSI is near the upper limit.
   const volumeConfirmed=volumeRatio>=3;
   const notExtended=rs<70&&move>0&&move<3;
-  const eligible=score===5&&volumeConfirmed&&notExtended;
+  const strategies=window.krakenR10Strategies?.evaluate(c5,c60,m.spread,m.turnover)||[];
+  const active=strategies.filter(x=>x.signal).map(x=>x.strategy);
+  const eligible=active.length>0&&notExtended;
   const verdict=eligible?'DA VALUTARE':score>=4?'OSSERVA':'ATTENDI';
-  const reason=missing.length?'Manca: '+missing.join(', '):!notExtended?'Movimento esteso o RSI elevato':'Segnali tecnici presenti';
-  return {...m,score,volumeRatio,breakout,trend,rsi:rs,spreadOk,move,eligible,verdict,reason};
+  const reason=active.length?'Strategie: '+active.join(', '):missing.length?'Manca: '+missing.join(', '):!notExtended?'Movimento esteso o RSI elevato':'Segnali tecnici presenti';
+  return {...m,strategies,score,volumeRatio,breakout,trend,rsi:rs,spreadOk,move,eligible,verdict,reason};
  }
  async function scan(){
   if(scanning)return;scanning=true;set('decisionStatus','ANALISI');set('decision','Radar in esecuzione: verifica volumi, rotture, RSI, trend e spread. Nessun ordine viene inviato.');
