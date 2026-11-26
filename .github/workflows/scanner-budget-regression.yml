@@ -6,6 +6,7 @@ on:
       - app.js
       - index.html
       - r10-strategies.js
+      - r10-backtest.js
       - .github/workflows/scanner-budget-regression.yml
 permissions:
   contents: read
@@ -18,6 +19,7 @@ jobs:
         run: |
           node --check app.js
           node --check r10-strategies.js
+          node --check r10-backtest.js
           node <<'NODE'
           const fs=require('node:fs'),assert=require('node:assert/strict'),vm=require('node:vm');
           const src=fs.readFileSync('app.js','utf8'),html=fs.readFileSync('index.html','utf8');
@@ -45,5 +47,15 @@ jobs:
           const result=evaluate(candles,candles,0.1,200000);
           assert.equal(result.length,4);
           assert(result.every(x=>!x.signal||x.reward/x.risk>=1.25));
+          const {simulate}=require('./r10-backtest.js');
+          const bars=Array.from({length:40},(_,i)=>({t:i*300,o:100,c:100,h:101,l:99,turnover:200000,minCost:1}));
+          const hours=Array.from({length:30},(_,i)=>({t:-108000+i*3600,c:100,h:101,l:99,v:100}));
+          const books=simulate(bars,hours,()=>[{strategy:'breakout',signal:true,cost:0.02,risk:0.04,reward:0.06}]);
+          assert.equal(Object.keys(books).length,4);
+          assert(books.breakout.position);
+          assert(books.breakout.cash>=5);
+          assert.equal(books.momentum.cash,35);
+          assert.equal(books.breakout.position.debit,10);
+          console.log('PASS_R10_BACKTEST_ISOLATION');
           console.log('PASS_R10_EUR_BUDGET_RESERVE_NO_ORDER_STRATEGIES');
           NODE
